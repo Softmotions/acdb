@@ -1,0 +1,12 @@
+{
+ "project_artifact": "acdb",
+ "project_author": "Anton Adamansky <adamansky@gmail.com>",
+ "project_base_lib": "iwnet",
+ "project_base_lib_cmake": "AddIWNET",
+ "project_base_lib_static": "IWNET::static",
+ "project_date": "Tue, 16 Aug 2022 22:28:04 +0700",
+ "project_description": "Clang C/C++ Compilation Database Generator for Arduino-cli build tool",
+ "project_license": "MIT",
+ "project_name": "ACDB",
+ "project_website": "https://github.com/Softmotions/acdb"
+}

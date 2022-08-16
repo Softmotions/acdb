@@ -1,0 +1,65 @@
+cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
+                      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/")
+
+set(DEB_CHANGELOG_REQUIRED ON)
+set(DEB_CHANGELOG "${CMAKE_CURRENT_SOURCE_DIR}/Changelog")
+unset(CHANGELOG_LAST_VERSION)
+unset(CHANGELOG_LAST_MESSAGE)
+
+include(DebChangelog)
+include(GitRevision)
+
+set(PROJECT_NAME "acdb")
+set(PROJECT_WEBSITE "https://github.com/Softmotions/acdb")
+set(PROJECT_VENDOR "Anton Adamansky <adamansky@gmail.com>")
+set(PROJECT_MAINTAINER "Anton Adamansky <adamansky@gmail.com>")
+set(PROJECT_DESCRIPTION_SUMMARY "Clang C/C++ Compilation Database Generator for Arduino-cli build tool")
+set(PROJECT_DESCRIPTION ${PROJECT_DESCRIPTION_SUMMARY})
+
+set(CHANGELOG_MESSAGE ${CHANGELOG_LAST_MESSAGE})
+set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO")
+set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "")
+
+set(PROJECT_VERSION_MAJOR ${CHANGELOG_LAST_VERSION_MAJOR})
+set(PROJECT_VERSION_MINOR ${CHANGELOG_LAST_VERSION_MINOR})
+set(PROJECT_VERSION_PATCH ${CHANGELOG_LAST_VERSION_PATCH})
+set(PROJECT_VERSION
+    ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH})
+set(${PROJECT_NAME}_VERSION ${PROJECT_VERSION})
+set(${PROJECT_NAME}_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(${PROJECT_NAME}_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(${PROJECT_NAME}_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+
+project(
+  ${PROJECT_NAME}
+  VERSION ${PROJECT_VERSION}
+  LANGUAGES C)
+
+include(GNUInstallDirs)
+include(ProjectUtils)
+
+option(BUILD_TESTS "Build test cases" OFF)
+
+if(BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+  add_definitions(-DIW_TESTS)
+endif()
+
+macro_ensure_out_of_source_build(
+  "${CMAKE_PROJECT_NAME} requires an out of source build.")
+
+add_subdirectory(src)
+add_subdirectory(tools)
+
+message("${PROJECT_NAME} CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
+message("${PROJECT_NAME} CMAKE_GENERATOR: ${CMAKE_GENERATOR}")
+if(CMAKE_SYSTEM_NAME)
+  message("${PROJECT_NAME} CMAKE_SYSTEM_NAME: ${CMAKE_SYSTEM_NAME}")
+endif()
+message("${PROJECT_NAME} PROJECT: ${CHANGELOG_LAST_LINE}")
+if(CHANGELOG_MESSAGE)
+  message("${PROJECT_NAME} CHANGELOG_MESSAGE:\n  ${CHANGELOG_MESSAGE}")
+endif()
+message("")
