@@ -9,6 +9,8 @@ struct env {
   const char  *program_file;
   const char **argv;
   const char  *sketch_dir;
+  const char  *arduino_cli_path;
+  const char  *fqbn;
 
   struct iwn_poller *poller;
 

@@ -29,9 +29,11 @@ static void _usage(const char *err) {
   }
   fprintf(stderr, "\n\tACDB\n");
   fprintf(stderr, "\nUsage %s [options] [sketch directory]\n", g_env.program);
-  fprintf(stderr, "\t-V, --verbose\t\tPrint verbose output\n");
-  fprintf(stderr, "\t-v, --version\t\tShow program version\n");
-  fprintf(stderr, "\t-h, --help\t\tPrint usage help\n");
+  fprintf(stderr, "\t-a, --arduino-cli=<>\t\tPath to the arduino-cli binary.\n");
+  fprintf(stderr, "\t-b, --fqbn=<>\t\tFully Qualified Board Name, e.g.: arduino:avr:uno\n");
+  fprintf(stderr, "\t-V, --verbose\t\tPrint verbose output.\n");
+  fprintf(stderr, "\t-v, --version\t\tShow program version.\n");
+  fprintf(stderr, "\t-h, --help\t\tPrint usage help.\n");
   fprintf(stderr, "\n");
 };
 
@@ -103,14 +105,15 @@ static int _main(int argc, char *argv[]) {
   }
 
   static const struct option long_options[] = {
-    { "help",    0, 0, 'h' },
-    { "verbose", 0, 0, 'V' },
-    { "version", 0, 0, 'v' },
-    { "conf",    1, 0, 'c' }
+    { "help",        0, 0, 'h' },
+    { "verbose",     0, 0, 'V' },
+    { "version",     0, 0, 'v' },
+    { "arduino-cli", 1, 0, 'a' },
+    { "fqbn",        1, 0, 'b' },
   };
 
   int ch;
-  while ((ch = getopt_long(argc, argv, "c:hvV", long_options, 0)) != -1) {
+  while ((ch = getopt_long(argc, argv, "a:b:c:hvV", long_options, 0)) != -1) {
     switch (ch) {
       case 'h':
         _usage(0);
@@ -122,6 +125,11 @@ static int _main(int argc, char *argv[]) {
       case 'V':
         g_env.verbose = true;
         break;
+      case 'a':
+        RCB(finish, g_env.arduino_cli_path = iwpool_strdup2(g_env.pool, optarg));
+        break;
+      case 'b':
+        RCB(finish, g_env.fqbn = iwpool_strdup2(g_env.pool, optarg));
       default:
         _usage(0);
         goto finish;
@@ -132,6 +140,10 @@ static int _main(int argc, char *argv[]) {
     RCB(finish, g_env.sketch_dir = iwpool_strdup2(g_env.pool, argv[optind]));
   } else {
     g_env.sketch_dir = g_env.cwd;
+  }
+
+  if (!g_env.arduino_cli_path) {
+    g_env.arduino_cli_path = "arduino-cli";
   }
 
   if (!_do_checks()) {
