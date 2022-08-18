@@ -151,11 +151,8 @@ static int _main(int argc, char *argv[]) {
   }
 
   RCC(rc, finish, iwn_poller_create(2, 1, &g_env.poller));
-
   RCC(rc, finish, run());
-
   iwn_poller_poll(g_env.poller);
-
   iwn_poller_destroy(&g_env.poller);
 
   rv = EXIT_SUCCESS;
