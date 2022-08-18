@@ -33,7 +33,7 @@ static void _cli_on_stdout(const struct iwn_proc_ctx *ctx, const char *buf, size
 }
 
 static void _cli_on_stderr(const struct iwn_proc_ctx *ctx, const char *buf, size_t len) {
-  fprintf(stderr, "[arduino-cli] %.*s", (int) len, buf);
+  fprintf(stderr, "[arduino-cli-err] %.*s", (int) len, buf);
 }
 
 static void _cli_on_exit(const struct iwn_proc_ctx *ctx) {
