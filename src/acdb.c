@@ -130,6 +130,7 @@ static int _main(int argc, char *argv[]) {
         break;
       case 'b':
         RCB(finish, g_env.fqbn = iwpool_strdup2(g_env.pool, optarg));
+        break;
       default:
         _usage(0);
         goto finish;
