@@ -44,12 +44,12 @@ static void _cli_on_exit(const struct iwn_proc_ctx *ctx) {
   struct run *run = ctx->user_data;
   if (code != 0) {
     fprintf(stderr, "arduino-cli failed, aborting..\n");
-    iwn_poller_shutdown_request(g_env.poller);
     goto finish;
   }
 
 finish:
   _run_destroy(run);
+  iwn_poller_shutdown_request(g_env.poller);
   return;
 }
 
