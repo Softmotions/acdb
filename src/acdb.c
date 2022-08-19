@@ -50,12 +50,16 @@ static void _on_signal(int signo) {
 
 static bool _do_checks(void) {
   if (g_env.verbose) {
-    iwlog_info("Sketch dir: %s", g_env.sketch_dir);
+    iwlog_verbose("Sketch dir: %s", g_env.sketch_dir);
   }
   struct stat st;
   int rv = stat(g_env.sketch_dir, &st);
   if (rv == -1) {
     iwlog_ecode_error(iwrc_set_errno(IW_ERROR_IO_ERRNO, errno), "%s", g_env.sketch_dir);
+    return false;
+  }
+  if (!S_ISDIR(st.st_mode)) {
+    fprintf(stderr, "%s is not a directory\n", g_env.sketch_dir);
     return false;
   }
   return true;

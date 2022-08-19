@@ -1,6 +1,6 @@
 cd ./
-file ./build/src/acdb /home/adam/Arduino/Blink
-#set args -c
+file ./build/src/acdb 
+set args -V /home/adam/Arduino/Blink
 
 set confirm off
 set follow-fork-mode parent
