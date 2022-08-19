@@ -78,6 +78,9 @@ iwrc run(void) {
     iwxstr_cat2(run->xstr, "\1--fqbn");
     iwxstr_printf(run->xstr, "\1%s", g_env.fqbn);
   }
+  if (g_env.sketch_dir) {
+    iwxstr_printf(run->xstr, "\1%s", g_env.sketch_dir);
+  }
 
   struct iwn_proc_spec spec = {
     .poller                  = g_env.poller,
