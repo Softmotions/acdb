@@ -3,7 +3,7 @@
 This small utility program generates `compile_commands.json` file in your Arduino sketch directory.
 A `compile_commands.json` is used by `cland` language server give you a proper IDE code completion.
 
-Now you can code Arduino projects in vim/neovim editor with [CoC](https://github.com/neoclide/coc.nvim) or neovim LSP server.
+Now you can code Arduino projects in vim/neovim editor with [CoC](https://github.com/neoclide/coc.nvim) or neovim LSP.
 
 ## Prerequisites
 
