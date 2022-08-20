@@ -15,6 +15,17 @@ Now you can code Arduino projects in vim/neovim editor with [CoC](https://github
 
 ## Installation
 
+### CoC users 
+
+Associate `.ino` files with coc-clangd language server:
+
+```vim
+let g:coc_filetype_map = {
+  \ 'ino': 'cpp',
+  \ }
+```
+
+
 ```sh
 git clone https://github.com/Softmotions/acdb
 
