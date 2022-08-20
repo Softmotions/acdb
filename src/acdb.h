@@ -16,6 +16,7 @@ struct env {
 
   IWPOOL *pool;
   int     argc;
+  int     exit_code;
   bool    verbose;
 };
 

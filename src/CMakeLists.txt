@@ -1,8 +1,5 @@
 if(NOT CMAKE_BUILD_TYPE)
-  message(
-    FATAL_ERROR
-      "Please specify the build type -DCMAKE_BUILD_TYPE=Debug|Release|RelWithDebInfo"
-  )
+  set(CMAKE_BUILD_TYPE Release)
 endif()
 
 set(CMAKE_C_FLAGS

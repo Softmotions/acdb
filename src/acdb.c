@@ -29,7 +29,7 @@ static void _usage(const char *err) {
   }
   fprintf(stderr, "\n\tACDB\n");
   fprintf(stderr, "\nUsage %s [options] [sketch directory]\n", g_env.program);
-  fprintf(stderr, "\t-a, --arduino-cli=<>\t\tPath to the arduino-cli binary.\n");
+  fprintf(stderr, "\t-a, --arduino-cli=<>\tPath to the arduino-cli binary.\n");
   fprintf(stderr, "\t-b, --fqbn=<>\t\tFully Qualified Board Name, e.g.: arduino:avr:uno\n");
   fprintf(stderr, "\t-V, --verbose\t\tPrint verbose output.\n");
   fprintf(stderr, "\t-v, --version\t\tShow program version.\n");
@@ -160,7 +160,7 @@ static int _main(int argc, char *argv[]) {
   iwn_poller_poll(g_env.poller);
   iwn_poller_destroy(&g_env.poller);
 
-  rv = EXIT_SUCCESS;
+  rv = g_env.exit_code;
 
 finish:
   if (rc) {

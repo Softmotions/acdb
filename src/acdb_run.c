@@ -4,6 +4,8 @@
 #include <iowow/iwp.h>
 #include <iowow/iwpool.h>
 #include <iowow/iwxstr.h>
+#include <iowow/iwutils.h>
+#include <iowow/iwjson.h>
 #include <iwnet/iwn_proc.h>
 
 #include <stdio.h>
@@ -29,11 +31,90 @@ static void _run_destroy(struct run *run) {
 }
 
 static void _cli_on_stdout(const struct iwn_proc_ctx *ctx, const char *buf, size_t len) {
-  fprintf(stdout, "[arduino-cli] %.*s", (int) len, buf);
+  if (g_env.verbose) {
+    fprintf(stdout, "[arduino-cli] %.*s", (int) len, buf);
+  }
 }
 
 static void _cli_on_stderr(const struct iwn_proc_ctx *ctx, const char *buf, size_t len) {
   fprintf(stderr, "[arduino-cli-err] %.*s", (int) len, buf);
+}
+
+static void _compile_commands_gen(struct run *run) {
+  iwrc rc = 0;
+
+  IWPOOL *pool = 0;
+  IWXSTR *xstr = 0;
+  FILE *file = 0;
+  JBL_NODE data, n;
+  char *buf = 0;
+
+  RCB(finish, pool = iwpool_create_empty());
+  RCB(finish, xstr = iwxstr_new());
+  RCC(rc, finish, iwxstr_printf(xstr, "%s/compile_commands.json", run->cdir));
+
+  buf = iwu_file_read_as_buf(iwxstr_ptr(xstr));
+  if (!buf) {
+    rc = iwrc_set_errno(IW_ERROR_IO_ERRNO, errno);
+    goto finish;
+  }
+
+  RCC(rc, finish, jbn_from_json(buf, &data, pool));
+  free(buf), buf = 0;
+
+  if (!data || data->type != JBV_ARRAY) {
+    iwlog_error2("Failed to parse compile_commands.json");
+    rc = IW_ERROR_FAIL;
+    goto finish;
+  }
+
+  iwxstr_clear(xstr);
+  RCC(rc, finish, iwxstr_printf(xstr, "%s/sketch/", run->cdir));
+
+  const char *prefix = iwxstr_ptr(xstr);
+  size_t prefix_len = iwxstr_size(xstr);
+
+  for (JBL_NODE nn = data->child; nn; nn = nn->next) {
+    jbn_at(nn, "/file", &n);
+    if (n && n->type == JBV_STR && !strncmp(n->vptr, prefix, prefix_len)) {
+      char *fn = (char*) n->vptr;
+      char *c = strrchr(fn, '.');
+      if (c) {
+        *c = 0;
+        n->vsize = c - fn;
+      }
+    }
+  }
+
+  iwxstr_clear(xstr);
+  RCC(rc, finish, iwxstr_printf(xstr, "%s/compile_commands.json", g_env.sketch_dir));
+  file = fopen(iwxstr_ptr(xstr), "w+");
+  if (!file) {
+    iwlog_error("Write failed: %s", iwxstr_ptr(xstr));
+    rc = iwrc_set_errno(IW_ERROR_IO_ERRNO, errno);
+    goto finish;
+  }
+
+  iwxstr_clear(xstr);
+  RCC(rc, finish, jbn_as_json(data, jbl_xstr_json_printer, xstr, JBL_PRINT_PRETTY));
+  if (fwrite(iwxstr_ptr(xstr), iwxstr_size(xstr), 1, file) != 1) {
+    iwlog_error("Write failed: %s", iwxstr_ptr(xstr));
+    rc = iwrc_set_errno(IW_ERROR_IO_ERRNO, errno);
+    goto finish;
+  }
+
+
+finish:
+  if (rc) {
+    iwlog_ecode_error3(rc);
+    g_env.exit_code = EXIT_FAILURE;
+  }
+  iwxstr_destroy(xstr);
+  iwpool_destroy(pool);
+  free(buf);
+  if (file) {
+    fclose(file);
+  }
 }
 
 static void _cli_on_exit(const struct iwn_proc_ctx *ctx) {
@@ -44,6 +125,8 @@ static void _cli_on_exit(const struct iwn_proc_ctx *ctx) {
     fprintf(stderr, "arduino-cli failed, exit code: %d aborting..\n", code);
     goto finish;
   }
+
+  _compile_commands_gen(run);
 
 finish:
   _run_destroy(run);
@@ -78,9 +161,7 @@ iwrc run(void) {
     iwxstr_cat2(run->xstr, "\1--fqbn");
     iwxstr_printf(run->xstr, "\1%s", g_env.fqbn);
   }
-  if (g_env.sketch_dir) {
-    iwxstr_printf(run->xstr, "\1%s", g_env.sketch_dir);
-  }
+  iwxstr_printf(run->xstr, "\1%s", g_env.sketch_dir);
 
   struct iwn_proc_spec spec = {
     .poller                  = g_env.poller,
