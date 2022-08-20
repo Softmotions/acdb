@@ -160,7 +160,7 @@ static int _main(int argc, char *argv[]) {
   iwn_poller_flags_set(g_env.poller, IWN_POLLER_POLL_NO_FDS);
   RCC(rc, finish, run());
   iwn_poller_poll(g_env.poller);
- 
+
   rv = g_env.exit_code;
 
 finish:
