@@ -17,9 +17,12 @@ Now you can code Arduino projects in vim/neovim editor with [CoC](https://github
 
 ```sh
 git clone https://github.com/Softmotions/acdb
-mkdir ./acdb/build && cd ./acdb/build
-cmake ..
 
+mkdir ./acdb/build && cd ./acdb/build
+
+cmake .. -DCMAKE_INSTALL_PREFIX=~/.local
+
+make install
 ```
 
 ## Usage
@@ -27,7 +30,7 @@ cmake ..
 ```sh
 	ACDB
 
-Usage ./acdb [options] [sketch directory]
+Usage acdb [options] [sketch directory]
 	-a, --arduino-cli=<>	Path to the arduino-cli binary.
 	-b, --fqbn=<>		Fully Qualified Board Name, e.g.: arduino:avr:uno
 	-V, --verbose		Print verbose output.
