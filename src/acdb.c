@@ -28,8 +28,8 @@ static void _usage(const char *err) {
     fprintf(stderr, "\nError:\n\n");
     fprintf(stderr, "\t%s\n\n", err);
   }
-  fprintf(stderr, "\n\tACDB\n");
-  fprintf(stderr, "\nUsage %s [options] [sketch directory]\n", g_env.program);
+  fprintf(stderr, "\n\tClang's C/C++ compile_commands.json generator for Arduino projects\n");
+  fprintf(stderr, "\n%s [options] [sketch directory]\n", g_env.program);
   fprintf(stderr, "\t-a, --arduino-cli=<>\tPath to the arduino-cli binary.\n");
   fprintf(stderr, "\t-b, --fqbn=<>\t\tFully Qualified Board Name, e.g.: arduino:avr:uno\n");
   fprintf(stderr, "\t-V, --verbose\t\tPrint verbose output.\n");
