@@ -1,6 +1,4 @@
-# ACDB
-
-Clang C/C++ Compilation Database Generator for Arduino projects.
+# Clang's C/C++ compile_commands.json generator for Arduino projects
 
 This small utility program generates `compile_commands.json` file in your Arduino sketch directory.
 A `compile_commands.json` is used by `cland` language server give you a proper IDE code completion.
