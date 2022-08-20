@@ -126,8 +126,13 @@ static void _cli_on_exit(const struct iwn_proc_ctx *ctx) {
   int code = WIFEXITED(ctx->wstatus) ? WEXITSTATUS(ctx->wstatus) : -1;
   struct run *run = ctx->user_data;
 
+  if (g_env.verbose) {
+    iwlog_verbose("arduino-cli exited: %d", code);
+  }
+
   if (code != 0) {
     fprintf(stderr, "arduino-cli failed, exit code: %d aborting..\n", code);
+    g_env.exit_code = code;
     goto finish;
   }
 
