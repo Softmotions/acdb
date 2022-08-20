@@ -77,12 +77,17 @@ static void _compile_commands_gen(struct run *run) {
   for (JBL_NODE nn = data->child; nn; nn = nn->next) {
     jbn_at(nn, "/file", &n);
     if (n && n->type == JBV_STR && !strncmp(n->vptr, prefix, prefix_len)) {
+      IWXSTR *npath = iwxstr_new();
       char *fn = (char*) n->vptr;
       char *c = strrchr(fn, '.');
-      if (c) {
+      if (npath && c) {
         *c = 0;
-        n->vsize = c - fn;
+        fn += prefix_len;
+        iwxstr_printf(npath, "%s/%s", g_env.sketch_dir, fn);
+        n->vptr = iwpool_strndup2(pool, iwxstr_ptr(npath), iwxstr_size(npath));
+        n->vsize = iwxstr_size(npath);
       }
+      iwxstr_destroy(npath);
     }
   }
 
