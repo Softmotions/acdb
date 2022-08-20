@@ -157,6 +157,7 @@ static int _main(int argc, char *argv[]) {
   }
 
   RCC(rc, finish, iwn_poller_create(2, 1, &g_env.poller));
+  iwn_poller_flags_set(g_env.poller, IWN_POLLER_POLL_NO_FDS);
   RCC(rc, finish, run());
   iwn_poller_poll(g_env.poller);
   iwn_proc_dispose();
