@@ -28,9 +28,9 @@ make install
 ## Usage
 
 ```sh
-	ACDB
 
-Usage acdb [options] [sketch directory]
+acdb [options] [sketch directory
+
 	-a, --arduino-cli=<>	Path to the arduino-cli binary.
 	-b, --fqbn=<>		Fully Qualified Board Name, e.g.: arduino:avr:uno
 	-V, --verbose		Print verbose output.
