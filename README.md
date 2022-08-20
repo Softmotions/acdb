@@ -47,3 +47,21 @@ acdb [options] [sketch directory
 	-h, --help		  Print usage help.
 ```
 
+
+```sh
+cd ./MySketch
+acdb --fqbn=arduino:avr:nano:cpu=atmega328old
+````
+
+or 
+
+```sh
+cat ./sketch.json 
+{
+  "cpu": {
+    "fqbn": "arduino:avr:nano:cpu=atmega328old"
+  }
+}
+
+acdb 
+```
