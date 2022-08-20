@@ -72,7 +72,7 @@ iwrc run(void) {
   iwxstr_cat2(run->xstr,
               "compile"
               "\1--only-compilation-database"
-              "\1--output-dir");
+              "\1--build-path");
   iwxstr_printf(run->xstr, "\1%s", run->cdir);
   if (g_env.fqbn) {
     iwxstr_cat2(run->xstr, "\1--fqbn");
