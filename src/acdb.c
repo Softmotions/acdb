@@ -5,6 +5,7 @@
 #include <iowow/iwlog.h>
 #include <iowow/iwp.h>
 #include <iowow/iwutils.h>
+#include <iwnet/iwn_proc.h>
 
 #include <errno.h>
 #include <getopt.h>
@@ -159,6 +160,7 @@ static int _main(int argc, char *argv[]) {
   RCC(rc, finish, run());
   iwn_poller_poll(g_env.poller);
   iwn_poller_destroy(&g_env.poller);
+  iwn_proc_dispose();
 
   rv = g_env.exit_code;
 
