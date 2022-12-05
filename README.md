@@ -65,3 +65,7 @@ cat ./sketch.json
 
 acdb 
 ```
+
+## Troubleshooting 
+
+Refer to https://github.com/Softmotions/acdb/issues/1
