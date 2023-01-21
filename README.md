@@ -1,6 +1,6 @@
 # Clang's C/C++ compile commands .json generator for Arduino projects
 
-This small utility program generates `compile_commands.json` file in your Arduino sketch directory.
+This is a small utility program which generates a `compile_commands.json` file in your Arduino sketch directory.
 A `compile_commands.json` is used by `cland` language server give you a proper IDE code completion.
 
 Now you can code Arduino projects in vim/neovim editor with [CoC](https://github.com/neoclide/coc.nvim) or neovim LSP.
@@ -65,3 +65,7 @@ cat ./sketch.json
 
 acdb 
 ```
+
+## Troubleshooting 
+
+Refer to https://github.com/Softmotions/acdb/issues/1
