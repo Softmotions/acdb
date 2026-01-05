@@ -1,0 +1,27 @@
+meta {
+  name { acdb }
+  artifact { acdb }
+  version { 1.0.0 }
+  description { Clang C/C++ Compilation Database Generator for Arduino-cli build tool }
+  website { "https://github.com/Softmotions/acdb" }
+}
+
+option { BUILD_TYPE               Build type: Release|Debug }
+
+if { !defined { BUILD_TYPE }
+  set {
+    BUILD_TYPE Release
+  }
+}
+
+env {
+  PKG_CONFIG_PATH
+  C{${INSTALL_PKGCONFIG_DIR}}
+}
+
+check {
+  system.sh
+}
+
+include { iwnet.autark }
+include { src/Autark }

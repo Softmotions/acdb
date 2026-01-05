@@ -1,5 +1,6 @@
 .cache
-/build
+/autark-cache
+compile_commands.json
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles

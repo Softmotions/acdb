@@ -1,0 +1,80 @@
+set {
+  CFLAGS
+  -std=c11
+  -fPIC
+
+  -Wextra
+  -Wno-implicit-fallthrough
+  -Wno-missing-braces
+  -Wno-missing-field-initializers
+  -Wno-sign-compare
+  -Wno-unknown-pragmas
+  -Wno-unused-function
+  -Wno-unused-parameter
+
+  -D_DEFAULT_SOURCE
+  -D_FILE_OFFSET_BITS=64
+  -DIW_EXEC
+
+if { prefix { ${BUILD_TYPE} Debug }
+   -O0
+   -g
+   -Werror
+   -Wno-unused-variable
+   -Wno-constant-logical-operand
+   -DDEBUG -D_DEBUG -UNDEBUG
+ } else {
+   -O3
+   if { ${ENABLE_DEBINFO}
+      -ggdb
+   }
+   -DNDEBUG
+   -DIW_RELEASE
+ }
+  
+  ..@@{${PKGCONF} --cflags libiwnet}
+
+  -I C{src}
+  -I S{src}
+}
+
+configure {
+  config.h.in
+}
+
+set {
+  SOURCES
+  acdb.c
+  acdb_run.c
+}
+
+cc {
+  ${SOURCES}
+  ${CFLAGS}
+  consumes {
+    config.h
+    C{include/iwnet/iwnet.h}
+  }
+}
+
+set {
+  LDFLAGS
+  ..${LDFLAGS}
+  ..@@{${PKGCONF} --libs --static libiwnet}
+}
+
+run {
+  exec { ${CC} -o ${META_ARTIFACT} ${CC_OBJS} ${LDFLAGS} }
+  consumes {
+    ${CC_OBJS}
+  }
+  produces {
+    ${META_ARTIFACT}
+  }
+}
+
+install {
+  ${INSTALL_BIN_DIR}
+  ${META_ARTIFACT}
+}
+

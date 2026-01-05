@@ -23,15 +23,11 @@ let g:coc_filetype_map = {
   \ }
 ```
 
-
 ```sh
 git clone https://github.com/Softmotions/acdb
 
-mkdir ./acdb/build && cd ./acdb/build
-
-cmake .. -DCMAKE_INSTALL_PREFIX=~/.local
-
-make install
+# Build and install acdb in ${HOME}/.local/bin
+./build.sh -I
 ```
 
 ## Usage
