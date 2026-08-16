@@ -5,8 +5,8 @@
 # Autark: aec5320de2e44ef5a0338f9ea990ed2a
 # https://github.com/Softmotions/autark
 
-META_VERSION=0.9.4
-META_REVISION=1eb896b
+META_VERSION=0.9.8
+META_REVISION=742341d
 cd "$(cd "$(dirname "$0")"; pwd -P)"
 
 prev_arg=""
@@ -61,8 +61,8 @@ mkdir -p ${AUTARK_HOME}
 cat <<'a292effa503b' > ${AUTARK_HOME}/autark.c
 #ifndef CONFIG_H
 #define CONFIG_H
-#define META_VERSION "0.9.4"
-#define META_REVISION "1eb896b"
+#define META_VERSION "0.9.8"
+#define META_REVISION "742341d"
 #define MACRO_MAX_RECURSIVE_CALLS 128
 #endif
 #define _AMALGAMATE_
@@ -393,6 +393,7 @@ int map_iter_next(struct map_iter*);
 #include <limits.h>
 #include <string.h>
 #include <sys/types.h>
+#include <stdio.h>
 #endif
 #define Q_XSTR(s) Q_STR(s)
 #define Q_STR(s)  #s
@@ -461,7 +462,7 @@ static inline bool utils_startswith(const char *str, const char *prefix) {
   }
   return strncmp(str, prefix, prefix_len) == 0;
 }
-static inline bool utils_endswith(const char *str, const char *suffix) {
+static inline int utils_endswith(const char *str, const char *suffix) {
   if (!str || !suffix) {
     return false;
   }
@@ -470,18 +471,25 @@ static inline bool utils_endswith(const char *str, const char *suffix) {
   if (suffix_len > str_len) {
     return false;
   }
-  return strcmp(str + str_len - suffix_len, suffix) == 0;
+  if (strcmp(str + str_len - suffix_len, suffix) == 0) {
+    return str_len - suffix_len + 1;
+  } else {
+    return 0;
+  }
 }
 long int utils_strtol(const char *v, int base, int *rcp);
 long long utils_strtoll(const char *v, int base, int *rcp);
 struct value utils_file_as_buf(const char *path, ssize_t buflen_max);
 int utils_file_write_buf(const char *path, const char *buf, size_t len, bool append);
-int utils_exec_path(char buf[PATH_MAX]);
+int utils_copy_file_streams(FILE *src, FILE *dst);
 int utils_copy_file(const char *src, const char *dst);
+int utils_copy_dir(const char *src, const char *dst);
+int utils_copy_dir_to_parent(const char *src, const char *dst);
 int utils_rename_file(const char *src, const char *dst);
 void utils_split_values_add(const char *v, struct xstr *xstr);
 int utils_fd_make_non_blocking(int fd);
 int64_t utils_current_time_ms(void);
+const char* utils_json_escape_str(const char *val, ssize_t len, struct xstr *xstr);
 //----------------------- Vlist
 struct vlist_iter {
   const char *item;
@@ -530,6 +538,7 @@ void spawn_env_path_prepend(struct spawn*, const char *path);
 void spawn_set_stdin_provider(struct spawn*, size_t (*provider)(char *buf, size_t buflen, struct spawn*));
 void spawn_set_stdout_handler(struct spawn*, void (*handler)(char *buf, size_t buflen, struct spawn*));
 void spawn_set_stderr_handler(struct spawn*, void (*handler)(char *buf, size_t buflen, struct spawn*));
+void spawn_visit_cmd(struct spawn*, void *user_data, void (*visitor)(int num, const char *arg, void*));
 void spawn_set_nowait(struct spawn*, bool nowait);
 void spawn_set_wstatus(struct spawn*, int wstatus);
 int spawn_do(struct spawn*);
@@ -577,6 +586,7 @@ char* path_normalize_cwd_pool(const char *path, const char *cwd, struct pool*);
 int path_mkdirs(const char *path);
 int path_mkdirs_for(const char *path);
 int path_rm_cache(const char *path);
+int path_rm_dir_recursive(const char *path);
 int path_stat(const char *path, struct akpath_stat *stat);
 int path_stat_fd(int fd, struct akpath_stat *stat);
 int path_stat_file(FILE *file, struct akpath_stat *stat);
@@ -595,11 +605,13 @@ AK_ALLOC char* path_relativize_cwd(const char *from, const char *to, const char 
 char* path_dirname(char *path);
 // Modifies its argument
 char* path_basename(char *path);
+AK_ALLOC char* path_join_path_alloc(const char *dir, const char *name, char **out);
+const char* path_join_path_pool(struct pool *pool, const char *dir, const char *name, const char **out);
 #endif
 #ifndef ENV_H
 #define ENV_H
 #ifndef _AMALGAMATE_
-#include "basedefs.h"
+#include "basedefs.h" // IWYU pragma: keep
 #include "pool.h"
 #include "map.h"
 #include "ulist.h"
@@ -608,16 +620,26 @@ char* path_basename(char *path);
 #define TAG_INIT  1
 #define TAG_SETUP 2
 #define TAG_BUILD 3
-#define AUTARK_CACHE  "autark-cache"
-#define AUTARK_SCRIPT "Autark"
-#define AUTARK_ROOT_DIR  "AUTARK_ROOT_DIR"  // Project root directory
-#define AUTARK_CACHE_DIR "AUTARK_CACHE_DIR" // Project cache directory
-#define AUTARK_UNIT      "AUTARK_UNIT"      // Path relative to AUTARK_ROOT_DIR of build process unit executed
-                                            // currently.
-#define AUTARK_VERBOSE "AUTARK_VERBOSE"     // Autark verbose env key
+#define AUTARK_SCRIPT            "Autark"
+#define AUTARK_CACHE             "autark-cache"
+#define AUTARK_CACHE_OVERLAY_DIR ".overlay"
+#define AUTARK_FETCHED_REG       ".autark-fetched"
+#define AUTARK_FETCHED_REG_DIST  ".autark-fetched-dist"
+#define AUTARK_FETCH_DEP         ".autark-fetch-dep"
+#define AUTARK_COMPILE_COMMANDS  ".compile_commands"
+#define AUTARK_ROOT_DIR_ENV          "AUTARK_ROOT_DIR"          // Project root directory
+#define AUTARK_CACHE_DIR_ENV         "AUTARK_CACHE_DIR"         // Project cache directory
+#define AUTARK_CACHE_OVERLAY_DIR_ENV "AUTARK_CACHE_OVERLAY_DIR" // Project cache overlay directory
+#define AUTARK_UNIT_ENV              "AUTARK_UNIT"              // Path relative to AUTARK_ROOT_DIR of build process
+                                                                // unit executed
+#define AUTARK_INSTALL_SRC_DEPS_ENV "AUTARK_INSTALL_SRC_DEPS"   // Install src with deps.
+#define AUTARK_COMPILE_COMMANDS_ENV "AUTARK_COMPILE_COMMANDS"   // Path to compile commands file.
+#define AUTARK_VERBOSE_ENV "AUTARK_VERBOSE"                     // Autark verbose env key
 #define UNIT_FLG_ROOT    0x01U // Project root unit
 #define UNIT_FLG_SRC_CWD 0x02U // Set project source dir as unit CWD
 #define UNIT_FLG_NO_CWD  0x04U // Do not change CWD for unit
+#define INSTALL_FLG_SRC_WITH_DEPS        0x01U // Provide distribution with dependencies.
+#define INSTALL_FLG_SRC_OVERLAYS_APPLIED 0x02U // Source overlays installed
 struct unit_env_item {
   const char  *val;
   struct node *n;
@@ -649,9 +671,12 @@ struct env {
   int verbose;
   int max_parallel_jobs;            // Max number of allowed parallel jobs.
   struct {
-    const char *root_dir;           // Project root source dir.
-    const char *cache_dir;          // Project artifacts cache dir.
+    const char *root_dir;           // Project root source dir. Not zero.
+    const char *cache_dir;          // Project artifacts cache dir. Not zero.
+    const char *cache_overlay_dir;  // Overlay data dir for autark cache. Can be zero.
     bool cleanup;                   // Clean project cache before build
+    bool compile_commands;          // Generate compile_commands.json database.
+    bool compile_commands_own;      // We own compile commands file.
     bool prepared;                  // Autark build prepared
     struct xstr *options;           // Ask option values
   } project;
@@ -663,7 +688,8 @@ struct env {
     const char *include_dir; // Path to include headers dir relative to prefix.
     const char *pkgconf_dir; // Path to pkgconfig dir.
     const char *man_dir;     // Path to man pages dir.
-    bool enabled;            // True if install operation should be performed
+    unsigned    flags;       // INSTALL_FLG_XXX
+    bool enabled;            // True if install operation should be performed.
   } install;
   struct {
     const char *extra_env_paths; // Extra PATH environment for any program spawn
@@ -736,6 +762,21 @@ int deps_add_sys_env(struct deps *d, char flags, const char *key, const char *va
 void deps_close(struct deps*);
 void deps_prune_all(const char *path);
 #endif
+#ifndef FETCHREG_H
+#define FETCHREG_H
+#ifndef _AMALGAMATE_
+#include <stdbool.h>
+#endif
+struct fetchreg;
+struct fetcherg_entry {
+  const char *url;
+  const char *target;
+};
+int fetchreg_open(const char *path, struct fetchreg **out);
+bool fetchreg_find(struct fetchreg*, const char *url, void *user_data, void (*cb)(const struct fetcherg_entry*, void*));
+int fetchreg_register(struct fetchreg*, const struct fetcherg_entry*);
+void fetchreg_close(struct fetchreg*);
+#endif
 #ifndef NODES_H
 #define NODES_H
 #ifndef _AMALGAMATE_
@@ -764,6 +805,7 @@ int node_install_setup(struct node*);
 int node_find_setup(struct node*);
 int node_macro_setup(struct node*);
 int node_call_setup(struct node*);
+int node_fetch_url_setup(struct node*);
 struct node* call_macro_node(struct node*);
 struct node* call_first_node(struct node*);
 void macro_register_call(struct node*);
@@ -789,48 +831,51 @@ void autark_build_prepare(const char *script_path);
 #include <stdbool.h>
 #endif
 // value types
-#define NODE_TYPE_VALUE    0x01U
-#define NODE_TYPE_SUBST    0x02U
-#define NODE_TYPE_SET      0x04U
-#define NODE_TYPE_JOIN     0x08U
-#define NODE_TYPE_BASENAME 0x10U
-#define NODE_TYPE_DIR      0x20U
-#define NODE_TYPE_FIND     0x40U
+#define NODE_TYPE_VALUE     0x01U
+#define NODE_TYPE_SUBST     0x02U
+#define NODE_TYPE_SET       0x04U
+#define NODE_TYPE_JOIN      0x08U
+#define NODE_TYPE_BASENAME  0x10U
+#define NODE_TYPE_DIR       0x20U
+#define NODE_TYPE_FIND      0x40U
+#define NODE_TYPE_FETCH_URL 0x80U
 // eof value types
-#define NODE_TYPE_SCRIPT     0x100U
-#define NODE_TYPE_BAG        0x200U
-#define NODE_TYPE_META       0x400U
-#define NODE_TYPE_CHECK      0x800U
-#define NODE_TYPE_INCLUDE    0x1000U
-#define NODE_TYPE_IF         0x2000U
-#define NODE_TYPE_RUN        0x4000U
-#define NODE_TYPE_CC         0x8000U
-#define NODE_TYPE_CONFIGURE  0x10000U
-#define NODE_TYPE_FOREACH    0x20000U
-#define NODE_TYPE_IN_SOURCES 0x40000U
-#define NODE_TYPE_OPTION     0x80000U
-#define NODE_TYPE_ERROR      0x100000U
-#define NODE_TYPE_ECHO       0x200000U
-#define NODE_TYPE_INSTALL    0x400000U
-#define NODE_TYPE_MACRO      0x800000U
-#define NODE_TYPE_CALL       0x1000000U
-#define NODE_FLG_BOUND      0x01U
-#define NODE_FLG_INIT       0x02U
-#define NODE_FLG_SETUP      0x04U
+#define NODE_TYPE_SCRIPT          0x100U
+#define NODE_TYPE_BAG             0x200U
+#define NODE_TYPE_META            0x400U
+#define NODE_TYPE_CHECK           0x800U
+#define NODE_TYPE_INCLUDE         0x1000U
+#define NODE_TYPE_IF              0x2000U
+#define NODE_TYPE_RUN             0x4000U
+#define NODE_TYPE_CC              0x8000U
+#define NODE_TYPE_CONFIGURE       0x10000U
+#define NODE_TYPE_FOREACH         0x20000U
+#define NODE_TYPE_IN_SOURCES      0x40000U
+#define NODE_TYPE_OPTION          0x80000U
+#define NODE_TYPE_ERROR           0x100000U
+#define NODE_TYPE_ECHO            0x200000U
+#define NODE_TYPE_INSTALL         0x400000U
+#define NODE_TYPE_MACRO           0x800000U
+#define NODE_TYPE_CALL            0x1000000U
+#define NODE_TYPE_INSTALL_SOURCES 0x2000000U
+#define NODE_FLG_BOUND 0x01U
+#define NODE_FLG_INIT  0x02U
+#define NODE_FLG_SETUP 0x04U
 // Vacant: 0x08U
-#define NODE_FLG_BUILT      0x10U // Node built
-#define NODE_FLG_POST_BUILT 0x20U // Node post-built
-#define NODE_FLG_IN_CACHE   0x40U
-#define NODE_FLG_IN_SRC     0x80U
-#define NODE_FLG_NO_CWD     0x100U
-#define NODE_FLG_NEGATE     0x200U
+#define NODE_FLG_BUILT                0x10U // Node built
+#define NODE_FLG_POST_BUILT           0x20U // Node post-built
+#define NODE_FLG_IN_CACHE             0x40U
+#define NODE_FLG_IN_SRC               0x80U
+#define NODE_FLG_NO_CWD               0x100U
+#define NODE_FLG_NEGATE               0x200U
+#define NODE_FLG_PREFER_SRC_RESOLVING 0x400U // Prefer resolving files in sources
 #define NODE_FLG_IN_ANY (NODE_FLG_IN_SRC | NODE_FLG_IN_CACHE | NODE_FLG_NO_CWD)
 #define node_is_init(n__)         (((n__)->flags & NODE_FLG_INIT) != 0)
 #define node_is_setup(n__)        (((n__)->flags & NODE_FLG_SETUP) != 0)
 #define node_is_built(n__)        (((n__)->flags & NODE_FLG_BUILT) != 0)
 #define node_is_post_built(n__)   (((n__)->flags & NODE_FLG_POST_BUILT) != 0)
 #define node_is_value(n__)        ((n__)->type == NODE_TYPE_VALUE)
-#define node_is_can_be_value(n__) ((n__)->type >= NODE_TYPE_VALUE && (n__)->type <= NODE_TYPE_FIND)
+#define node_is_can_be_value(n__) ((n__)->type >= NODE_TYPE_VALUE && (n__)->type <= NODE_TYPE_FETCH_URL)
 #define node_is_rule(n__) !node_is_value(n__)
 #define NODE_PRINT_INDENT 2
 struct node_foreach {
@@ -895,7 +940,7 @@ void node_build(struct node *n);
 void node_post_build(struct node *n);
 struct node* node_find_direct_child(struct node *n, int type, const char *val);
 struct node* node_find_prev_sibling(struct node *n);
-struct  node* node_find_parent_of_type(struct node *n, int type);
+struct node* node_find_parent_of_type(struct node *n, int type);
 struct node_foreach* node_find_parent_foreach(struct node *n);
 bool node_is_value_may_be_dep_saved(struct node *n, unsigned skip_type);
 struct node* node_consumes_resolve(
@@ -933,6 +978,11 @@ void node_fatal(int rc, struct node *n, const char *fmt, ...);
 void node_info(struct node *n, const char *fmt, ...);
 void node_warn(struct node *n, const char *fmt, ...);
 int node_error(int rc, struct node *n, const char *fmt, ...);
+#define node_check(node__, exp__)                    \
+        do {                                         \
+          int e = (exp__);                           \
+          if (e) node_fatal(e, node__, Q(exp__), 0); \
+        } while (0)
 struct node* node_clone_and_register(struct node*);
 int node_bind(struct node*);
 #endif
@@ -1320,7 +1370,7 @@ char* ulist_to_vlist(const struct ulist *list) {
 #include <stdio.h>
 #endif
 #define _UNIT_ALIGN_SIZE 8UL
-static int _extend(struct pool *pool, size_t siz);
+static void _extend(struct pool *pool, size_t siz);
 struct pool* pool_create_empty(void) {
   return xcalloc(1, sizeof(struct pool));
 }
@@ -1348,7 +1398,7 @@ void pool_destroy(struct pool *pool) {
   }
   free(pool);
 }
-static int _extend(struct pool *pool, size_t siz) {
+static void _extend(struct pool *pool, size_t siz) {
   struct pool_unit *nunit = xmalloc(sizeof(*nunit));
   siz = ROUNDUP(siz, _UNIT_ALIGN_SIZE);
   nunit->heap = xmalloc(siz);
@@ -1357,7 +1407,6 @@ static int _extend(struct pool *pool, size_t siz) {
   pool->unit = nunit;
   pool->usiz = 0;
   pool->asiz = siz;
-  return 1;
 }
 void* pool_alloc(struct pool *pool, size_t siz) {
   siz = ROUNDUP(siz, _UNIT_ALIGN_SIZE);
@@ -1365,9 +1414,7 @@ void* pool_alloc(struct pool *pool, size_t siz) {
   void *h = pool->heap;
   if (usiz > pool->asiz) {
     usiz = usiz + pool->asiz;
-    if (!_extend(pool, usiz)) {
-      return 0;
-    }
+    _extend(pool, usiz);
     h = pool->heap;
   }
   pool->usiz += siz;
@@ -2005,6 +2052,7 @@ int map_iter_next(struct map_iter *iter) {
 }
 #ifndef _AMALGAMATE_
 #include "utils.h"
+#include "paths.h"
 #include "xstr.h"
 #include "log.h"
 #include <string.h>
@@ -2013,6 +2061,8 @@ int map_iter_next(struct map_iter *iter) {
 #include <fcntl.h>
 #include <stdio.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #endif
 struct value utils_file_as_buf(const char *path, ssize_t buflen_max) {
   struct value ret = { 0 };
@@ -2075,6 +2125,28 @@ int utils_file_write_buf(const char *path, const char *buf, size_t len, bool app
   close(fd);
   return 0;
 }
+int utils_copy_file_streams(FILE *sf, FILE *df) {
+  char buf[8192];
+  size_t nr = 0;
+  while (1) {
+    nr = fread(buf, 1, sizeof(buf), sf);
+    if (nr) {
+      size_t offset = 0;
+      while (offset < nr) {
+        size_t nw = fwrite(buf + offset, 1, nr - offset, df);
+        if (!nw) {
+          return AK_ERROR_IO;
+        }
+        offset += nw;
+      }
+    } else if (feof(sf)) {
+      break;
+    } else if (ferror(sf)) {
+      return AK_ERROR_IO;
+    }
+  }
+  return 0;
+}
 int utils_copy_file(const char *src, const char *dst) {
   int rc = 0;
   char buf[8192];
@@ -2092,10 +2164,14 @@ int utils_copy_file(const char *src, const char *dst) {
   while (1) {
     nr = fread(buf, 1, sizeof(buf), sf);
     if (nr) {
-      nr = fwrite(buf, 1, nr, df);
-      if (!nr) {
-        rc = AK_ERROR_IO;
-        break;
+      size_t offset = 0;
+      while (offset < nr) {
+        size_t nw = fwrite(buf + offset, 1, nr - offset, df);
+        if (!nw) {
+          rc = AK_ERROR_IO;
+          goto finish;
+        }
+        offset += nw;
       }
     } else if (feof(sf)) {
       break;
@@ -2104,8 +2180,13 @@ int utils_copy_file(const char *src, const char *dst) {
       break;
     }
   }
+finish:
   fclose(sf);
-  fclose(df);
+  if (fclose(df)) {
+    if (!rc) {
+      rc = AK_ERROR_IO;
+    }
+  }
   return rc;
 }
 int utils_rename_file(const char *src, const char *dst) {
@@ -2121,6 +2202,279 @@ int utils_rename_file(const char *src, const char *dst) {
     }
   }
   return 0;
+}
+static inline int _utils_same_file(const struct stat *a, const struct stat *b) {
+  return a->st_dev == b->st_dev
+         && a->st_ino == b->st_ino;
+}
+static int _utils_path_is_same_or_child(const char *parent, const char *path) {
+  size_t len = strlen(parent);
+  if (strncmp(parent, path, len) != 0) {
+    return 0;
+  }
+  if (path[len] == '\0') {
+    return 1;
+  }
+  if (len == 1 && parent[0] == '/') {
+    return path[0] == '/';
+  }
+  return path[len] == '/';
+}
+static char* _utils_real_existing_ancestor(const char *path) {
+  char *current = strdup(path);
+  if (!current) {
+    errno = ENOMEM;
+    return 0;
+  }
+  for ( ; ; ) {
+    char *real = realpath(current, 0);
+    if (real) {
+      free(current);
+      return real;
+    }
+    if (errno != ENOENT && errno != ENOTDIR) {
+      int rc = errno;
+      free(current);
+      errno = rc;
+      return 0;
+    }
+    size_t len = strlen(current);
+    while (len > 1 && current[len - 1] == '/') {
+      current[--len] = '\0';
+    }
+    char *slash = strrchr(current, '/');
+    if (!slash) {
+      free(current);
+      current = strdup(".");
+      if (!current) {
+        errno = ENOMEM;
+        return 0;
+      }
+    } else if (slash == current) {
+      current[1] = '\0';
+    } else {
+      *slash = '\0';
+    }
+  }
+}
+static int _utils_check_overlap(const char *src, const char *dst) {
+  struct stat st;
+  if (lstat(src, &st) != 0) {
+    return errno;
+  }
+  if (S_ISLNK(st.st_mode)) {
+    return ELOOP;
+  }
+  if (!S_ISDIR(st.st_mode)) {
+    return ENOTDIR;
+  }
+  char *src_real = realpath(src, 0);
+  if (!src_real) {
+    return errno;
+  }
+  char *dst_ancestor = _utils_real_existing_ancestor(dst);
+  if (!dst_ancestor) {
+    int rc = errno;
+    free(src_real);
+    return rc;
+  }
+  int rc = _utils_path_is_same_or_child(src_real, dst_ancestor) ? EINVAL : 0;
+  if (!rc) {
+    if (lstat(dst, &st) == 0) {
+      if (S_ISLNK(st.st_mode)) {
+        rc = ELOOP;
+      } else if (!S_ISDIR(st.st_mode)) {
+        rc = ENOTDIR;
+      } else {
+        char *dst_real = realpath(dst, 0);
+        if (!dst_real) {
+          rc = errno;
+        } else {
+          if (_utils_path_is_same_or_child(
+                dst_real, src_real)) {
+            rc = EINVAL;
+          }
+          free(dst_real);
+        }
+      }
+    } else if (errno != ENOENT) {
+      rc = errno;
+    }
+  }
+  free(dst_ancestor);
+  free(src_real);
+  return rc;
+}
+static int _utils_copy_symlink(const char *src, const char *dst, const struct stat *src_st) {
+  ssize_t len;
+  char *target = 0;
+  size_t capacity = src_st->st_size > 0 ? (size_t) src_st->st_size + 1 : 256;
+  for ( ; ; ) {
+    target = malloc(capacity + 1);
+    if (!target) {
+      return ENOMEM;
+    }
+    len = readlink(src, target, capacity);
+    if (len < 0) {
+      int rc = errno;
+      free(target);
+      return rc;
+    }
+    if ((size_t) len < capacity) {
+      break;
+    }
+    free(target);
+    if (capacity > SIZE_MAX / 2) {
+      return EOVERFLOW;
+    }
+    capacity *= 2;
+  }
+  target[len] = '\0';
+  struct stat dst_st;
+  if (lstat(dst, &dst_st) == 0) {
+    if (S_ISDIR(dst_st.st_mode)) {
+      free(target);
+      return EISDIR;
+    }
+    if (unlink(dst) != 0) {
+      int rc = errno;
+      free(target);
+      return rc;
+    }
+  } else if (errno != ENOENT) {
+    int rc = errno;
+    free(target);
+    return rc;
+  }
+  int rc = symlink(target, dst) == 0 ? 0 : errno;
+  free(target);
+  return rc;
+}
+static int _utils_copy_regular(
+  const char        *src,
+  const char        *dst,
+  const struct stat *src_st) {
+  struct stat dst_st;
+  if (lstat(dst, &dst_st) == 0) {
+    if (S_ISDIR(dst_st.st_mode)) {
+      return EISDIR;
+    }
+    if (S_ISLNK(dst_st.st_mode)) {
+      if (unlink(dst) != 0) {
+        return errno;
+      }
+    } else if (!S_ISREG(dst_st.st_mode)) {
+      return ENOTSUP;
+    } else if (_utils_same_file(src_st, &dst_st)) {
+      return EINVAL;
+    }
+  } else if (errno != ENOENT) {
+    return errno;
+  }
+  int rc = utils_copy_file(src, dst);
+  if (  !rc
+     && chmod(dst, src_st->st_mode & 07777) != 0) {
+    rc = errno;
+  }
+  return rc;
+}
+static int _utils_copy_dir_recursive(const char *src, const char *dst) {
+  struct stat src_st;
+  struct stat dst_st;
+  if (lstat(src, &src_st) != 0) {
+    return errno;
+  }
+  if (S_ISLNK(src_st.st_mode)) {
+    return ELOOP;
+  }
+  if (!S_ISDIR(src_st.st_mode)) {
+    return ENOTDIR;
+  }
+  int created = 0;
+  if (lstat(dst, &dst_st) == 0) {
+    if (S_ISLNK(dst_st.st_mode)) {
+      return ELOOP;
+    }
+    if (!S_ISDIR(dst_st.st_mode)) {
+      return ENOTDIR;
+    }
+    if (_utils_same_file(&src_st, &dst_st)) {
+      return EINVAL;
+    }
+  } else if (errno == ENOENT) {
+    if (mkdir(dst, 0700) != 0) {
+      return errno;
+    }
+    created = 1;
+  } else {
+    return errno;
+  }
+  DIR *dir = opendir(src);
+  if (!dir) {
+    return errno;
+  }
+  int rc = 0;
+  for ( ; ; ) {
+    errno = 0;
+    struct dirent *entry = readdir(dir);
+    if (!entry) {
+      if (errno) {
+        rc = errno;
+      }
+      break;
+    }
+    if (  !strcmp(entry->d_name, ".")
+       || !strcmp(entry->d_name, "..")) {
+      continue;
+    }
+    struct stat entry_st;
+    char *src_path = path_join_path_alloc(src, entry->d_name, 0);
+    char *dst_path = path_join_path_alloc(dst, entry->d_name, 0);
+    if (lstat(src_path, &entry_st) != 0) {
+      rc = errno;
+    } else if (S_ISDIR(entry_st.st_mode)) {
+      rc = _utils_copy_dir_recursive(src_path, dst_path);
+    } else if (S_ISREG(entry_st.st_mode)) {
+      rc = _utils_copy_regular(src_path, dst_path, &entry_st);
+    } else if (S_ISLNK(entry_st.st_mode)) {
+      rc = _utils_copy_symlink(src_path, dst_path, &entry_st);
+    } else {
+      // FIFO, socket, block/character device.
+      rc = ENOTSUP;
+    }
+    free(src_path);
+    free(dst_path);
+    if (rc) {
+      break;
+    }
+  }
+  if (closedir(dir) != 0 && !rc) {
+    rc = errno;
+  }
+  if (  created
+     && chmod(dst, src_st.st_mode & 07777) != 0
+     && !rc) {
+    rc = errno;
+  }
+  return rc;
+}
+int utils_copy_dir(const char *src, const char *dst) {
+  if (!src || !*src || !dst || !*dst) {
+    return AK_ERROR_INVALID_ARGS;
+  }
+  int rc = _utils_check_overlap(src, dst);
+  return rc ? rc : _utils_copy_dir_recursive(src, dst);
+}
+int utils_copy_dir_to_parent(const char *src, const char *dst) {
+  if (!src || !*src || !dst || !*dst) {
+    return AK_ERROR_INVALID_ARGS;
+  }
+  struct pool *pool = pool_create_empty();
+  char *bname = path_basename(pool_strdup(pool, src));
+  dst = path_join_path_pool(pool, dst, bname, 0);
+  int rv = utils_copy_dir(src, dst);
+  pool_destroy(pool);
+  return rv;
 }
 long int utils_strtol(const char *v, int base, int *rcp) {
   *rcp = 0;
@@ -2202,10 +2556,34 @@ int64_t utils_current_time_ms(void) {
   }
 #else
   struct timeval tv;
-  gettimeofday(&tv, NULL);
+  gettimeofday(&tv, 0);
   return (int64_t) tv.tv_sec * 1000 + tv.tv_usec / 1000;
 #endif
   return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+const char* utils_json_escape_str(const char *val, ssize_t len, struct xstr *xstr) {
+  if (!val || !xstr) {
+    return 0;
+  }
+  if (len < 0) {
+    len = strlen(val);
+  }
+  static const char *specials = "btnvfr";
+  xstr_cat2(xstr, "\"", 1);
+  for (size_t i = 0; i < len; ++i) {
+    uint8_t ch = (uint8_t) val[i];
+    if (ch == '"' || ch == '\'') {
+      xstr_cat2(xstr, "\\", 1);
+      xstr_cat2(xstr, &ch, 1);
+    } else if (ch >= '\b' && ch <= '\r') {
+      xstr_cat2(xstr, "\\", 1);
+      xstr_cat2(xstr, &specials[ch - '\b'], 1);
+    } else {
+      xstr_cat2(xstr, &ch, 1);
+    }
+  }
+  xstr_cat2(xstr, "\"", 1);
+  return xstr_ptr(xstr);
 }
 #ifndef _AMALGAMATE_
 #include "paths.h"
@@ -2347,6 +2725,9 @@ char* path_normalize_pool(const char *path, struct pool *pool) {
   return path_normalize_cwd_pool(path, cwd, pool);
 }
 char* path_normalize_cwd_pool(const char *path, const char *cwd, struct pool *pool) {
+  if (cwd == 0) {
+    return path_normalize_pool(path, pool);
+  }
   char buf[PATH_MAX];
   path_normalize_cwd(path, cwd, buf);
   return pool_strdup(pool, buf);
@@ -2446,6 +2827,30 @@ int path_rm_cache(const char *path) {
     if (!_is_autark_dist_root(child)) {
       _rm_dir_recursive(child);
     }
+  }
+  closedir(dir);
+  return 0;
+}
+int path_rm_dir_recursive(const char *path) {
+  char resolved[PATH_MAX];
+  char child[PATH_MAX];
+  if (!path_is_dir(path)) {
+    return 0;
+  }
+  if (!realpath(path, resolved)) {
+    return errno;
+  }
+  DIR *dir = opendir(resolved);
+  if (!dir) {
+    return errno;
+  }
+  for (struct dirent *entry; (entry = readdir(dir)) != 0; ) {
+    const char *name = entry->d_name;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+      continue;
+    }
+    snprintf(child, sizeof(child), "%s/%s", path, name);
+    _rm_dir_recursive(child);
   }
   closedir(dir);
   return 0;
@@ -2615,6 +3020,38 @@ const char* path_is_prefix_for(const char *prefix, const char *path, const char 
     return 0;
   }
 }
+char* path_join_path_alloc(const char *dir, const char *name, char **out) {
+  while (*name == '/') ++name;
+  size_t dl = strlen(dir);
+  size_t nl = strlen(name);
+  size_t slash = dl && dir[dl - 1] != '/';
+  char *path = xmalloc(dl + slash + nl + 1);
+  memcpy(path, dir, dl);
+  if (slash) {
+    path[dl++] = '/';
+  }
+  memcpy(path + dl, name, nl + 1);
+  if (out) {
+    *out = path;
+  }
+  return path;
+}
+const char* path_join_path_pool(struct pool *pool, const char *dir, const char *name, const char **out) {
+  while (*name == '/') ++name;
+  size_t dl = strlen(dir);
+  size_t nl = strlen(name);
+  size_t slash = dl && dir[dl - 1] != '/';
+  char *path = pool_alloc(pool, dl + slash + nl + 1);
+  memcpy(path, dir, dl);
+  if (slash) {
+    path[dl++] = '/';
+  }
+  memcpy(path + dl, name, nl + 1);
+  if (out) {
+    *out = path;
+  }
+  return path;
+}
 #ifndef _AMALGAMATE_
 #include "spawn.h"
 #include "log.h"
@@ -2669,6 +3106,12 @@ struct spawn* spawn_create(const char *exec, void *user_data) {
     spawn_env_path_prepend(s, g_env.spawn.extra_env_paths);
   }
   return s;
+}
+void spawn_visit_cmd(struct spawn *s, void *user_data, void (*visitor)(int num, const char *arg, void*)) {
+  for (int i = 0; i < s->args.num; ++i) {
+    const char *arg = *(const char**) ulist_get(&s->args, i);
+    visitor(i, arg, user_data);
+  }
 }
 static const char* _spawn_arg_add(struct spawn *s, const char *arg, int len) {
   if (!arg || *arg == '\0') {
@@ -3203,6 +3646,116 @@ void deps_close(struct deps *d) {
 }
 void deps_prune_all(const char *path) {
   unlink(path);
+}
+#ifndef _AMALGAMATE_
+#include "log.h"
+#include "fetchreg.h"
+#include "alloc.h"
+#include "utils.h"
+#include <stdio.h>
+#include <errno.h>
+#endif
+struct fetchreg {
+  FILE *f;
+};
+static void _fetchreg_destroy(struct fetchreg *r) {
+  if (r) {
+    if (r->f) {
+      fclose(r->f);
+    }
+    free(r);
+  }
+}
+int fetchreg_open(const char *path, struct fetchreg **out) {
+  akassert(path && out);
+  FILE *f = fopen(path, "a+");
+  if (!f) {
+    *out = 0;
+    return errno;
+  }
+  struct fetchreg *r = xmalloc(sizeof(*r));
+  r->f = f;
+  *out = r;
+  return 0;
+}
+bool fetchreg_find(
+  struct fetchreg *r,
+  const char *url,
+  void *user_data,
+  void (*cb)(const struct fetcherg_entry*, void*)) {
+  akassert(r && url);
+  char buf[PATH_MAX * 3 + 2];
+  char sbuf[sizeof(buf)];
+  struct fetcherg_entry se = { 0 };
+  if (fseek(r->f, 0, SEEK_SET) == -1) {
+    akerror(errno, "fetchreg for %s", url);
+    return false;
+  }
+  // Find the last matched fetched entry
+  while (fgets(buf, sizeof(buf), r->f)) {
+    struct fetcherg_entry e = { 0 };
+    int idxs[1] = { 0 };
+    char *rp = buf;
+    for ( ; *rp; ++rp) {
+      if (*rp == '\1') {
+        *rp = '\0';
+        if (strcmp(buf, url) != 0) {
+          break;
+        }
+        e.url = buf;
+        if (rp[1] != '\0' && rp[1] != '\n') {
+          e.target = rp + 1;
+          idxs[0] = e.target - buf;
+        }
+        break;
+      }
+    }
+    if (e.url) {
+      memset(&se, 0, sizeof(se));
+      memcpy(sbuf, buf, sizeof(buf));
+      se.url = sbuf;
+      if (idxs[0]) {
+        char *target = sbuf + idxs[0];
+        int rv = utils_endswith(target, "\n");
+        if (rv) {
+          target[rv - 1] = '\0';
+        }
+        se.target = target;
+      }
+    }
+  }
+  if (se.url) {
+    if (cb) {
+      cb(&se, user_data);
+    }
+    return true;
+  } else {
+    return false;
+  }
+}
+int fetchreg_register(struct fetchreg *r, const struct fetcherg_entry *entry) {
+  if (!r || !entry || !entry->url) {
+    return AK_ERROR_INVALID_ARGS;
+  }
+  long int old_pos = ftell(r->f);
+  if (fseek(r->f, SEEK_END, 0) == -1) {
+    return errno;
+  }
+  if (entry->target) {
+    if (fprintf(r->f, "%s\1%s\n", entry->url, entry->target) < 0) {
+      return errno;
+    }
+  } else {
+    if (fprintf(r->f, "%s\1\n", entry->url) < 0) {
+      return errno;
+    }
+  }
+  fseek(r->f, old_pos, SEEK_SET);
+  fflush(r->f);
+  return 0;
+}
+void fetchreg_close(struct fetchreg *r) {
+  _fetchreg_destroy(r);
 }
 #ifndef _AMALGAMATE_
 #include "script.h"
@@ -4639,7 +5192,14 @@ int node_configure_setup(struct node *n) {
 #include <string.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <stdio.h>
+#include <unistd.h>
 #endif
+/// Compilation database state.
+struct _cdb {
+  const char *path;
+  char _path[PATH_MAX];
+} _cdb;
 struct _cc_ctx {
   struct pool *pool;
   struct ulist sources;     // char*
@@ -4651,10 +5211,11 @@ struct _cc_ctx {
   struct node *n_consumes;
   struct node *n_objects;
   const char  *cc;
-  const char *objskey;
+  const char  *objskey;
   struct ulist consumes;    // sizeof(char*)
   int num_failed;
 };
+static void _cc_cdb_entry_add(struct node *n, struct spawn *s, const char *src, const char *tgt);
 static void _cc_deps_MMD_item_add(const char *item, struct node *n, struct deps *deps, const char *src) {
   char buf[127];
   char *p = strrchr(item, '.');
@@ -4763,6 +5324,7 @@ static void _cc_on_build_source(
   spawn_arg_add(s, src);
   spawn_arg_add(s, "-o");
   spawn_arg_add(s, obj);
+  _cc_cdb_entry_add(n, s, src, obj);
   int rc = spawn_do(s);
   if (rc) {
     spawn_destroy(s);
@@ -4912,6 +5474,101 @@ static void _cc_on_resolve_init(struct node_resolve *r) {
     node_consumes_resolve(r->n, ctx->n_consumes->child, 0, _cc_on_consumed_resolved, r->n);
   }
 }
+static void _cc_cdb_init(struct node *n) {
+  if (!g_env.project.compile_commands) {
+    return;
+  }
+  const char *path = getenv(AUTARK_COMPILE_COMMANDS_ENV);
+  if (!path) {
+    return;
+  }
+  if (g_env.project.compile_commands_own) {
+    unlink(path);
+  }
+  utils_strncpy(_cdb._path, path, sizeof(_cdb._path));
+  _cdb.path = _cdb._path;
+}
+struct _cc_cdb_arg_ctx {
+  FILE *file;
+  struct xstr *xstr;
+};
+static void _cc_cdb_arg_add(int num, const char *arg, void *d) {
+  struct _cc_cdb_arg_ctx *ctx = d;
+  xstr_clear(ctx->xstr);
+  utils_json_escape_str(arg, -1, ctx->xstr);
+  if (num) {
+    fprintf(ctx->file, ",\n      %s", xstr_ptr(ctx->xstr));
+  } else {
+    fprintf(ctx->file, "\n      %s", xstr_ptr(ctx->xstr));
+  }
+}
+static void _cc_cdb_entry_add(struct node *n, struct spawn *s, const char *src, const char *tgt) {
+  if (!_cdb.path) {
+    return;
+  }
+  FILE *f = fopen(_cdb.path, "a");
+  if (!f) {
+    node_fatal(errno, n, "Error opening file for writing: %s", _cdb.path);
+  }
+  long int pos = ftell(f);
+  if (pos == -1) {
+    node_fatal(errno, n, "File: %s", _cdb.path);
+  }
+  struct xstr *xstr = xstr_create_empty();
+  if (pos > 0) {
+    fprintf(f, ",\n  {\n");
+  } else {
+    fprintf(f, "\n  {\n");
+  }
+  fprintf(f, "    \"arguments\": [");
+  spawn_visit_cmd(s, &(struct _cc_cdb_arg_ctx) { f, xstr }, _cc_cdb_arg_add);
+  fprintf(f, "\n    ],\n");
+  struct unit *unit = unit_peek();
+  xstr_clear(xstr);
+  utils_json_escape_str(unit->cache_dir, -1, xstr);
+  fprintf(f, "    \"directory\": %s,\n", xstr_ptr(xstr));
+  xstr_clear(xstr);
+  utils_json_escape_str(src, -1, xstr);
+  fprintf(f, "    \"file\": %s,\n", xstr_ptr(xstr));
+  xstr_clear(xstr);
+  utils_json_escape_str(tgt, -1, xstr);
+  fprintf(f, "    \"output\": %s\n", xstr_ptr(xstr));
+  fprintf(f, "  }");
+  xstr_destroy(xstr);
+  fclose(f);
+}
+static void _cc_post_build(struct node *n) {
+  int rc = 0;
+  if (!_cdb.path || !g_env.project.compile_commands_own) {
+    return;
+  }
+  const char *path = _cdb.path;
+  _cdb.path = 0;
+  FILE *sf = fopen(path, "r");
+  if (!sf) {
+    return;
+  }
+  unlink(path);
+  path = _cdb._path;
+  snprintf(_cdb._path, sizeof(_cdb._path), "%s/compile_commands.json", g_env.project.cache_dir);
+  FILE *tf = fopen(path, "w");
+  if (!tf) {
+    rc = errno;
+    fclose(sf);
+    node_fatal(rc, n, "Error opening file for writing: %s", path);
+  }
+  fputs("[", tf);
+  rc = utils_copy_file_streams(sf, tf);
+  if (rc) {
+    fclose(sf);
+    fclose(tf);
+    node_fatal(rc, n, "Error writing file: %s", path);
+  }
+  fputs("\n]", tf);
+  fclose(sf);
+  fclose(tf);
+  node_info(n, "Compilation database file created: %s", path);
+}
 static void _cc_build(struct node *n) {
   struct _cc_ctx *ctx = n->impl;
   char *objs = ulist_to_vlist(&ctx->objects);
@@ -4978,6 +5635,7 @@ static void _cc_source_add(struct node *n, const char *src) {
   node_product_add(n, obj, 0);
 }
 static void _cc_setup(struct node *n) {
+  _cc_cdb_init(n);
   struct _cc_ctx *ctx = n->impl;
   const char *val = node_value(ctx->n_sources);
   if (is_vlist(val)) {
@@ -5079,6 +5737,7 @@ int node_cc_setup(struct node *n) {
   n->init = _cc_init;
   n->setup = _cc_setup;
   n->build = _cc_build;
+  n->post_build = _cc_post_build;
   n->dispose = _cc_dispose;
   struct pool *pool = pool_create_empty();
   struct _cc_ctx *ctx = pool_alloc(pool, sizeof(*ctx));
@@ -5427,16 +6086,17 @@ int node_echo_setup(struct node *n) {
 #include <sys/types.h>
 #include <limits.h>
 #include <errno.h>
+#include <dirent.h>
 #endif
 struct _install_on_resolve_ctx {
   struct node_resolve *r;
   struct node *n;
   struct node *n_target;
   struct ulist consumes;  // sizeof(char*)
+  bool install_overlays;
 };
-static void _install_symlink(struct _install_on_resolve_ctx *ctx, const char *src, const char *dst, struct stat *st) {
+static void _install_symlink(struct node *n, const char *src, const char *dst, struct stat *st) {
   char buf[PATH_MAX];
-  struct node *n = ctx->n;
   node_info(n, "Symlink %s => %s", src, dst);
   ssize_t len = readlink(src, buf, sizeof(buf) - 1);
   if (len == -1) {
@@ -5460,8 +6120,7 @@ static void _install_symlink(struct _install_on_resolve_ctx *ctx, const char *sr
 #endif
   utimensat(AT_FDCWD, dst, times, AT_SYMLINK_NOFOLLOW);
 }
-static void _install_file(struct _install_on_resolve_ctx *ctx, const char *src, const char *dst, struct stat *st) {
-  struct node *n = ctx->n;
+static void _install_file(struct node *n, const char *src, const char *dst, struct stat *st) {
   node_info(n, "File %s => %s", src, dst);
   int in_fd = open(src, O_RDONLY);
   if (in_fd == -1) {
@@ -5505,21 +6164,47 @@ static void _install_file(struct _install_on_resolve_ctx *ctx, const char *src, 
   close(in_fd);
   close(out_fd);
 }
-static void _install_do(struct node_resolve *r, const char *src, const char *target) {
+static void _install_do(struct _install_on_resolve_ctx *ctx, char *src, const char *target) {
   char src_buf[PATH_MAX];
   char dst_buf[PATH_MAX];
   struct stat st;
-  struct _install_on_resolve_ctx *ctx = r->user_data;
-  akcheck(lstat(src, &st));
-  if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
-    node_fatal(AK_ERROR_FAIL, ctx->n, "Cannot install unsupported file type. File: %s", src);
+  struct node *n = ctx->n;
+  if (ctx->install_overlays) {
+    if (utils_endswith(src, "/" AUTARK_FETCH_DEP)) {
+      // autark-cache/.overlay/myproj/.autark-fetch-dep = autark-cache/.overlay/myproj
+      src = path_dirname(src);
+      snprintf(dst_buf, sizeof(dst_buf), "%s/" AUTARK_CACHE "/" AUTARK_CACHE_OVERLAY_DIR, target);
+      path_mkdirs(dst_buf);
+      int rci = utils_copy_dir_to_parent(src, dst_buf);
+      if (rci) {
+        node_fatal(rci, n, "Failed copy %s directory into %s", src, target);
+      }
+      return;
+    } else if (utils_endswith(src, "/" AUTARK_FETCHED_REG)) {
+      snprintf(dst_buf,
+               sizeof(dst_buf),
+               "%s/" AUTARK_CACHE "/" AUTARK_CACHE_OVERLAY_DIR "/" AUTARK_FETCHED_REG_DIST,
+               target);
+      path_mkdirs_for(dst_buf);
+      _install_file(n, src, dst_buf, &st);
+      return;
+    }
+  }
+  if (lstat(src, &st) || (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode) && !S_ISDIR(st.st_mode))) {
+    node_fatal(AK_ERROR_FAIL, n, "Cannot install unsupported or non accessible file. File: %s", src);
   }
   utils_strncpy(src_buf, src, sizeof(src_buf));
   snprintf(dst_buf, sizeof(dst_buf), "%s/%s", target, path_basename(src_buf));
   if (S_ISREG(st.st_mode)) {
-    _install_file(ctx, src, dst_buf, &st);
+    path_mkdirs_for(dst_buf);
+    _install_file(n, src, dst_buf, &st);
   } else if (S_ISLNK(st.st_mode)) {
-    _install_symlink(ctx, src, dst_buf, &st);
+    _install_symlink(n, src, dst_buf, &st);
+  } else if (S_ISDIR(st.st_mode)) {
+    int rci = utils_copy_dir_to_parent(src, target);
+    if (rci) {
+      node_fatal(rci, n, "Failed copy %s directory into %s", src, target);
+    }
   }
 }
 static void _install_dep_add(struct deps *deps, const char *src, const char *target) {
@@ -5562,8 +6247,8 @@ static void _install_on_resolve(struct node_resolve *r) {
     }
   }
   for (int i = 0; i < slist->num; ++i) {
-    const char *src = *(const char**) ulist_get(slist, i);
-    _install_do(r, src, target);
+    char *src = *(char**) ulist_get(slist, i);
+    _install_do(ctx, src, target);
   }
   rc = deps_open(r->deps_path_tmp, 0, &deps);
   if (rc) {
@@ -5587,9 +6272,6 @@ static void _install_on_resolve(struct node_resolve *r) {
 }
 static void _install_on_consumed_resolved(const char *path_, void *d) {
   struct _install_on_resolve_ctx *ctx = d;
-  if (path_is_dir(path_)) {
-    node_fatal(AK_ERROR_FAIL, ctx->n, "Installing of directories is not supported. Path: %s", path_);
-  }
   const char *path = pool_strdup(ctx->r->pool, path_);
   ulist_push(&ctx->consumes, &path);
 }
@@ -5600,18 +6282,43 @@ static void _install_on_resolve_init(struct node_resolve *r) {
   if (nn) {
     node_consumes_resolve(r->n, nn, 0, _install_on_consumed_resolved, ctx);
   }
+  if (ctx->install_overlays) {
+    DIR *dir = opendir(g_env.project.cache_overlay_dir);
+    if (dir) {
+      for (struct dirent *entry; (entry = readdir(dir)) != 0; ) {
+        const char *name = entry->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+          continue;
+        }
+        if (strcmp(name, AUTARK_FETCHED_REG) == 0) {
+          const char *file = pool_printf(r->pool, "%s/" AUTARK_FETCHED_REG, g_env.project.cache_overlay_dir);
+          ulist_push(&ctx->consumes, &file);
+        } else {
+          const char *file = pool_printf(r->pool, "%s/%s/" AUTARK_FETCH_DEP, g_env.project.cache_overlay_dir, name);
+          if (path_is_file(file)) {
+            ulist_push(&ctx->consumes, &file);
+          }
+        }
+      }
+      closedir(dir);
+    }
+  }
 }
 static void _install_post_build(struct node *n) {
   struct _install_on_resolve_ctx ctx = {
     .n = n,
     .n_target = n->child,
     .consumes = { .usize = sizeof(char*) },
+    .install_overlays = (  n->type == NODE_TYPE_INSTALL_SOURCES && g_env.project.cache_overlay_dir != 0
+                        && !(g_env.install.flags & INSTALL_FLG_SRC_OVERLAYS_APPLIED))
   };
   if (!ctx.n_target || !node_is_can_be_value(ctx.n_target)) {
     node_fatal(AK_ERROR_SCRIPT_SYNTAX, n, "No target dir specified");
   }
-  if (!ctx.n_target->next || !node_is_can_be_value(ctx.n_target->next)) {
-    node_fatal(AK_ERROR_SCRIPT_SYNTAX, n, "At least one source file/dir should be specified");
+  if (n->type != NODE_TYPE_INSTALL_SOURCES) {
+    if (!ctx.n_target->next || !node_is_can_be_value(ctx.n_target->next)) {
+      node_fatal(AK_ERROR_SCRIPT_SYNTAX, n, "At least one source file/dir should be specified");
+    }
   }
   struct node_resolve r = {
     .n = n,
@@ -5628,12 +6335,19 @@ static void _install_post_build(struct node *n) {
   }
   node_resolve(&r);
   ulist_destroy_keep(&ctx.consumes);
+  if (ctx.install_overlays) {
+    g_env.install.flags |= INSTALL_FLG_SRC_OVERLAYS_APPLIED;
+  }
 }
 int node_install_setup(struct node *n) {
   if (!g_env.install.enabled || !g_env.install.prefix_dir) {
     return 0;
   }
-  n->flags |= NODE_FLG_IN_CACHE;
+  if (n->type == NODE_TYPE_INSTALL_SOURCES) {
+    n->flags |= NODE_FLG_IN_SRC | NODE_FLG_PREFER_SRC_RESOLVING;
+  } else {
+    n->flags |= NODE_FLG_IN_CACHE;
+  }
   n->post_build = _install_post_build;
   return 0;
 }
@@ -5976,6 +6690,56 @@ int node_call_setup(struct node *n) {
   return 0;
 }
 #ifndef _AMALGAMATE_
+#include "env.h"
+#include "script.h"
+#include "paths.h"
+#include "fetchreg.h"
+#endif
+static void _fetch_url_regcb(const struct fetcherg_entry *e, void *d) {
+  struct node *n = d;
+  if (e->target) {
+    struct xstr *xstr = xstr_create_empty();
+    xstr_printf(xstr, "dir://%s/%s", g_env.project.cache_overlay_dir, e->target);
+    n->impl = xstr_destroy_keep_ptr(xstr);
+  }
+}
+static const char* _fetch_url_value_get(struct node *n) {
+  if (n->impl) {
+    return n->impl;
+  }
+  if (!n->child) {
+    return "";
+  }
+  const char *url = node_value(n->child);
+  if (!g_env.project.cache_overlay_dir) {
+    return url;
+  }
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/" AUTARK_FETCHED_REG_DIST, g_env.project.cache_overlay_dir);
+  if (!path_is_file(path)) {
+    return url;
+  }
+  struct fetchreg *reg;
+  int rc = fetchreg_open(path, &reg);
+  if (rc) {
+    node_fatal(rc, n, "Error opening fetched registry: %s", path);
+  }
+  fetchreg_find(reg, url, n, _fetch_url_regcb);
+  fetchreg_close(reg);
+  return n->impl ? n->impl : url;
+}
+static void _fetch_url_dispose(struct node *n) {
+  if (n->impl) {
+    free(n->impl);
+  }
+}
+int node_fetch_url_setup(struct node *n) {
+  n->flags |= NODE_FLG_NO_CWD;
+  n->value_get = _fetch_url_value_get;
+  n->dispose = _fetch_url_dispose;
+  return 0;
+}
+#ifndef _AMALGAMATE_
 #ifndef META_VERSION
 #define META_VERSION "dev"
 #endif
@@ -5991,6 +6755,7 @@ int node_call_setup(struct node *n) {
 #include "map.h"
 #include "alloc.h"
 #include "deps.h"
+#include "fetchreg.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -6035,7 +6800,7 @@ struct node* unit_env_get_node(struct unit *u, const char *key, unsigned *out_ta
       *out_tag = item->tag;
     }
     return item->n;
-  } else if (out_tag)  {
+  } else if (out_tag) {
     *out_tag = 0;
   }
   return 0;
@@ -6142,7 +6907,7 @@ void unit_push(struct unit *unit, struct node *n) {
   }
   ulist_push(&g_env.stack_units, &ctx);
   unit_ch_dir(&ctx, 0);
-  setenv(AUTARK_UNIT, unit->rel_path, 1);
+  setenv(AUTARK_UNIT_ENV, unit->rel_path, 1);
 }
 struct unit* unit_pop(void) {
   akassert(g_env.stack_units.num > 0);
@@ -6151,9 +6916,9 @@ struct unit* unit_pop(void) {
   struct unit_ctx peek = unit_peek_ctx();
   if (peek.unit) {
     unit_ch_dir(&peek, 0);
-    setenv(AUTARK_UNIT, peek.unit->rel_path, 1);
+    setenv(AUTARK_UNIT_ENV, peek.unit->rel_path, 1);
   } else {
-    unsetenv(AUTARK_UNIT);
+    unsetenv(AUTARK_UNIT_ENV);
   }
   return ctx->unit;
 }
@@ -6213,20 +6978,20 @@ void unit_ch_src_dir(struct unit *unit, char *prevcwd) {
   }
   akcheck(chdir(unit->dir));
 }
-static int _usage_va(const char *err, va_list ap) {
+static int _usage_va(
+  const char *err,
+  va_list     ap) {
   if (err) {
     fprintf(stderr, "\nError:  ");
     vfprintf(stderr, err, ap);
     fprintf(stderr, "\n\n");
   }
-  fprintf(stderr, "Usage\n");
-  fprintf(stderr, "\nCommon options:\n"
-          "    -V, --verbose               Outputs verbose execution info.\n"
+  fprintf(stderr,
+          "\nautark [options] [sources_dir] | [command [options]]\n");
+  fprintf(stderr,
+          "\n    -V, --verbose               Outputs verbose execution info.\n"
           "    -v, --version               Prints version info.\n"
           "    -h, --help                  Prints usage help.\n");
-  fprintf(stderr,
-          "\nautark [sources_dir/command] [options]\n"
-          "  Build project in given sources dir.\n");
   fprintf(stderr,
           "    -H, --cache=<>              Project cache/build dir. Default: ./" AUTARK_CACHE "\n");
   fprintf(stderr,
@@ -6238,9 +7003,14 @@ static int _usage_va(const char *err, va_list ap) {
   fprintf(stderr,
           "    -D<option>[=<val>]          Set project build option.\n");
   fprintf(stderr,
-          "    -I, --install               Install all built artifacts\n");
+          "    -k, --compile-commands      Generates compile_commands.json database. Sets -c option implicitly.\n");
+  fprintf(stderr,
+          "    -I, --install               Installs all built artifacts\n");
   fprintf(stderr,
           "    -R, --prefix=<>             Install prefix. Default: $HOME/.local\n");
+  fprintf(stderr,
+          "    -S, --install-source-deps   Builds autonomous source distribution package dir with all external project dependencies packed.\n"
+          "                                Sets -c option implicitly.\n");
   fprintf(stderr,
           "        --bindir=<>             Path to 'bin' dir relative to a `prefix` dir. Default: bin\n");
   fprintf(stderr,
@@ -6258,7 +7028,7 @@ static int _usage_va(const char *err, va_list ap) {
   fprintf(stderr,
           "        --pkgconfdir=<>         Path to 'pkgconfig' dir relative to prefix dir. Default: lib/pkgconfig");
 #endif
-  fprintf(stderr, "\nautark <cmd> [options]\n");
+  fprintf(stderr, "\n\nautark <cmd> [options]\n");
   fprintf(stderr, "  Execute a given command from check script.\n");
   fprintf(stderr,
           "\nautark set <key>=<value>\n"
@@ -6273,6 +7043,10 @@ static int _usage_va(const char *err, va_list ap) {
           "\nautark glob <pattern>\n"
           "   -C, --dir                   Current directory for glob list.\n"
           "  Lists files in current directory filtered by glob pattern.\n");
+  fprintf(stderr,
+          "\nautark fetched <url> <target_dir>\n"
+          "  Registers external resource located at <url> is downloaded to <target_dir>.\n"
+          "  See .autark/fetch_resource.sh script.\n");
   fprintf(stderr, "\n");
   return AK_ERROR_INVALID_ARGS;
 }
@@ -6292,7 +7066,7 @@ void autark_build_prepare(const char *script_path) {
   autark_init();
   if (!g_env.project.root_dir) {
     if (script_path) {
-      utils_strncpy(path_buf, script_path, PATH_MAX);
+      utils_strncpy(path_buf, script_path, sizeof(path_buf));
       g_env.project.root_dir = pool_strdup(g_env.pool, path_dirname(path_buf));
     } else {
       g_env.project.root_dir = g_env.cwd;
@@ -6318,6 +7092,22 @@ void autark_build_prepare(const char *script_path) {
   if (path_is_prefix_for(g_env.project.cache_dir, g_env.project.root_dir, 0)) {
     akfatal(AK_ERROR_FAIL, "Project cache dir cannot be parent of project root dir", 0);
   }
+  setenv(AUTARK_ROOT_DIR_ENV, g_env.project.root_dir, 1);
+  setenv(AUTARK_CACHE_DIR_ENV, g_env.project.cache_dir, 1);
+  if ((g_env.install.flags & INSTALL_FLG_SRC_WITH_DEPS) || getenv(AUTARK_INSTALL_SRC_DEPS_ENV)) {
+    g_env.install.enabled = true;
+    g_env.install.flags |= INSTALL_FLG_SRC_WITH_DEPS;
+    setenv(AUTARK_INSTALL_SRC_DEPS_ENV, "1", 0);
+  }
+  const char *cache_overlay_dir = path_join_path_pool(g_env.pool, g_env.project.cache_dir, AUTARK_CACHE_OVERLAY_DIR, 0);
+  if (path_is_dir(cache_overlay_dir)) {
+    g_env.project.cache_overlay_dir = cache_overlay_dir;
+    setenv(AUTARK_CACHE_OVERLAY_DIR_ENV, g_env.project.cache_overlay_dir, 1);
+  } else if ((g_env.install.flags & INSTALL_FLG_SRC_WITH_DEPS) || getenv(AUTARK_CACHE_OVERLAY_DIR_ENV)) {
+    g_env.project.cache_overlay_dir = cache_overlay_dir;
+    setenv(AUTARK_CACHE_OVERLAY_DIR_ENV, g_env.project.cache_overlay_dir, 1);
+    path_mkdirs(g_env.project.cache_overlay_dir);
+  }
   if (g_env.project.cleanup) {
     if (path_is_dir(g_env.project.cache_dir)) {
       int rc = path_rm_cache(g_env.project.cache_dir);
@@ -6326,32 +7116,40 @@ void autark_build_prepare(const char *script_path) {
       }
     }
   }
-  utils_strncpy(path_buf, script_path, PATH_MAX);
+  utils_strncpy(path_buf, script_path, sizeof(path_buf));
   const char *path = path_basename(path_buf);
   struct unit *unit = unit_create(path, UNIT_FLG_SRC_CWD | UNIT_FLG_ROOT, g_env.pool);
   unit_push(unit, 0);
   if (!path_is_dir(g_env.project.cache_dir) || !path_is_accesible_read(g_env.project.cache_dir)) {
     akfatal(AK_ERROR_FAIL, "Failed to access build CACHE directory: %s", g_env.project.cache_dir);
   }
-  setenv(AUTARK_ROOT_DIR, g_env.project.root_dir, 1);
-  setenv(AUTARK_CACHE_DIR, g_env.project.cache_dir, 1);
   if (g_env.verbose) {
-    setenv(AUTARK_VERBOSE, "1", 1);
+    setenv(AUTARK_VERBOSE_ENV, "1", 1);
+  }
+  if (g_env.project.compile_commands) {
+    snprintf(path_buf, sizeof(path_buf), "%s/" AUTARK_COMPILE_COMMANDS, g_env.project.cache_dir);
+    setenv(AUTARK_COMPILE_COMMANDS_ENV, path_buf, 0);
+  } else if (getenv(AUTARK_COMPILE_COMMANDS_ENV) != 0) {
+    g_env.project.compile_commands = true;
   }
 }
-static void _project_env_read(void) {
+static void _project_command_env_read(void) {
   autark_init();
-  const char *val = getenv(AUTARK_CACHE_DIR);
+  const char *val = getenv(AUTARK_CACHE_DIR_ENV);
   if (!val) {
     akfatal(AK_ERROR_FAIL, "Missing required AUTARK_CACHE_DIR env variable", 0);
   }
   g_env.project.cache_dir = pool_strdup(g_env.pool, val);
-  val = getenv(AUTARK_ROOT_DIR);
+  val = getenv(AUTARK_ROOT_DIR_ENV);
   if (!val) {
     akfatal(AK_ERROR_FAIL, "Missing required AUTARK_ROOT_DIR env variable", 0);
   }
   g_env.project.root_dir = pool_strdup(g_env.pool, val);
-  val = getenv(AUTARK_UNIT);
+  val = getenv(AUTARK_CACHE_OVERLAY_DIR_ENV);
+  if (val) {
+    g_env.project.cache_overlay_dir = pool_strdup(g_env.pool, val);
+  }
+  val = getenv(AUTARK_UNIT_ENV);
   if (!val) {
     akfatal(AK_ERROR_FAIL, "Missing required AUTARK_UNIT env variable", 0);
   }
@@ -6362,7 +7160,7 @@ static void _project_env_read(void) {
   unit_push(unit, 0);
 }
 static void _on_command_set(int argc, const char **argv) {
-  _project_env_read();
+  _project_command_env_read();
   const char *kv;
   if (optind >= argc) {
     _usage("Missing <key> argument");
@@ -6384,12 +7182,7 @@ static void _on_command_set(int argc, const char **argv) {
   }
   fclose(f);
 }
-static void _on_command_dep(int argc, const char **argv) {
-  _project_env_read();
-  if (optind >= argc) {
-    _usage("Missing required dependency option");
-  }
-  const char *file = argv[optind];
+static void _on_command_dep_impl(const char *file) {
   if (g_env.verbose) {
     akinfo("autark dep %s", file);
   }
@@ -6410,8 +7203,64 @@ static void _on_command_dep(int argc, const char **argv) {
   }
   deps_close(&deps);
 }
+static void _on_command_dep(int argc, const char **argv) {
+  _project_command_env_read();
+  if (optind >= argc) {
+    _usage("Missing required dependency option: autark dep <file>");
+  }
+  const char *file = argv[optind];
+  _on_command_dep_impl(file);
+}
+static void _on_command_fetched(int argc, const char **argv) {
+  _project_command_env_read();
+  if (optind + 1 >= argc) {
+    _usage("Missing required command arg: autark fetched <project_url> <target_dir>");
+  }
+  const char *url = argv[optind++];
+  const char *target_dir = argv[optind++];
+  if (g_env.verbose) {
+    akinfo("autark fetched %s %s", url, target_dir);
+  }
+  struct pool *pool = pool_create_empty();
+  target_dir = path_normalize_pool(target_dir, pool);
+  const char *fetch_dep_file = path_join_path_pool(pool, target_dir, AUTARK_FETCH_DEP, 0);
+  int rc = utils_file_write_buf(fetch_dep_file, "", 0, false);
+  if (rc) {
+    akfatal(rc, "autark fetched Failed to create dependency file: %s", fetch_dep_file);
+  }
+  _on_command_dep_impl(fetch_dep_file);
+  if (  g_env.project.cache_overlay_dir
+     && path_is_prefix_for(g_env.project.cache_dir, target_dir, 0)) {
+    char *target_rel = path_relativize_cwd(g_env.project.cache_dir, target_dir, g_env.project.cache_dir);
+    const char *overlay_target = path_join_path_pool(pool, g_env.project.cache_overlay_dir, target_rel, 0);
+    rc = path_mkdirs_for(overlay_target);
+    if (rc) {
+      akfatal(rc, "autark fetched Failed to create parent dir for: %s", overlay_target);
+    }
+    if (g_env.verbose) {
+      akinfo("autark fetched Copy overlay dir: %s into %s", target_dir, overlay_target);
+    }
+    rc = utils_copy_dir(target_dir, overlay_target);
+    if (rc) {
+      akfatal(rc, "Error copying dir: %s into: %s", target_dir, overlay_target);
+    }
+    struct fetchreg *reg;
+    const char *path = path_join_path_pool(pool, g_env.project.cache_overlay_dir, AUTARK_FETCHED_REG, 0);
+    rc = fetchreg_open(path, &reg);
+    if (rc) {
+      akfatal(rc, "autark fetched Failed to open fetch registry file: %s", path);
+    }
+    akcheck(fetchreg_register(reg, &(struct fetcherg_entry) {
+      .url = url,
+      .target = target_rel,
+    }));
+    fetchreg_close(reg);
+    free(target_rel);
+  }
+  pool_destroy(pool);
+}
 static void _on_command_dep_env(int argc, const char **argv) {
-  _project_env_read();
+  _project_command_env_read();
   if (optind >= argc) {
     _usage("Missing required dependency option");
   }
@@ -6468,6 +7317,9 @@ void on_command_dep(int argc, const char **argv) {
 }
 void on_command_dep_env(int argc, const char **argv) {
   _on_command_dep_env(argc, argv);
+}
+void on_command_fetched(int argc, const char **argv) {
+  _on_command_fetched(argc, argv);
 }
 #endif
 static void _build(struct ulist *options) {
@@ -6572,11 +7424,13 @@ void autark_run(int argc, const char **argv) {
   static const struct option long_options[] = {
     { "cache", 1, 0, 'H' },
     { "clean", 0, 0, 'c' },
+    { "compile-commands", 0, 0, 'k' },
     { "help", 0, 0, 'h' },
     { "verbose", 0, 0, 'V' },
     { "version", 0, 0, 'v' },
     { "options", 0, 0, 'l' },
     { "install", 0, 0, 'I' },
+    { "install-source-deps", 0, 0, 'S' },
     { "prefix", 1, 0, 'R' },
     { "dir", 1, 0, 'C' },
     { "jobs", 1, 0, 'J' },
@@ -6591,7 +7445,7 @@ void autark_run(int argc, const char **argv) {
   bool version = false;
   const char *cdir = 0;
   struct ulist options = { .usize = sizeof(char*) };
-  for (int ch; (ch = getopt_long(argc, (void*) argv, "+H:chVvlR:C:D:J:I", long_options, 0)) != -1; ) {
+  for (int ch; (ch = getopt_long(argc, (void*) argv, "+H:ckhVvlR:C:D:J:IS", long_options, 0)) != -1; ) {
     switch (ch) {
       case 'H':
         g_env.project.cache_dir = pool_strdup(g_env.pool, optarg);
@@ -6601,6 +7455,10 @@ void autark_run(int argc, const char **argv) {
         break;
       case 'c':
         g_env.project.cleanup = true;
+        break;
+      case 'k':
+        g_env.project.compile_commands = true;
+        g_env.project.compile_commands_own = getenv(AUTARK_COMPILE_COMMANDS_ENV) == 0;
         break;
       case 'v':
         version = true;
@@ -6624,6 +7482,10 @@ void autark_run(int argc, const char **argv) {
         break;
       case 'C':
         cdir = pool_strdup(g_env.pool, optarg);
+        break;
+      case 'S':
+        g_env.install.enabled = true;
+        g_env.install.flags |= INSTALL_FLG_SRC_WITH_DEPS;
         break;
       case -1:
         g_env.install.bin_dir = pool_strdup(g_env.pool, optarg);
@@ -6665,10 +7527,13 @@ void autark_run(int argc, const char **argv) {
     _exit(0);
   }
   if (!g_env.verbose) {
-    const char *v = getenv(AUTARK_VERBOSE);
-    if (v && *v == '1') {
+    const char *v = getenv(AUTARK_VERBOSE_ENV);
+    if (v && (*v == '1' || *v == 'y' || *v == 'Y')) {
       g_env.verbose = true;
     }
+  }
+  if (g_env.project.compile_commands || (g_env.install.flags & INSTALL_FLG_SRC_WITH_DEPS)) {
+    g_env.project.cleanup = true;
   }
   char buf[PATH_MAX];
   const char *autark_home = getenv("AUTARK_HOME");
@@ -6731,6 +7596,9 @@ void autark_run(int argc, const char **argv) {
       return;
     } else if (strcmp(arg, "glob") == 0) {
       _on_command_glob(argc, argv, cdir);
+      return;
+    } else if (strcmp(arg, "fetched") == 0) {
+      _on_command_fetched(argc, argv);
       return;
     } else { // Root dir expected
       g_env.project.root_dir = pool_strdup(g_env.pool, arg);
@@ -7541,6 +8409,10 @@ static unsigned _rule_type(const char *key, unsigned *flags) {
     return NODE_TYPE_MACRO;
   } else if (strcmp(key, "call") == 0) {
     return NODE_TYPE_CALL;
+  } else if (strcmp(key, "install-sources") == 0) {
+    return NODE_TYPE_INSTALL_SOURCES;
+  } else if (strcmp(key, "fetch-url") == 0) {
+    return NODE_TYPE_FETCH_URL;
   } else {
     return NODE_TYPE_BAG;
   }
@@ -7616,7 +8488,7 @@ static struct xnode* _push_and_register(struct _yycontext *yy, struct xnode *x) 
   _node_register(yy->x->base.ctx, x);
   return x;
 }
-static struct xnode* _node_text(struct  _yycontext *yy, const char *text) {
+static struct xnode* _node_text(struct _yycontext *yy, const char *text) {
   struct sctx *ctx = XCTX(yy->x);
   struct xnode *x = pool_calloc(g_env.pool, sizeof(*x));
   x->base.value = pool_strdup(g_env.pool, text);
@@ -7625,7 +8497,7 @@ static struct xnode* _node_text(struct  _yycontext *yy, const char *text) {
   x->base.lnum = yy->x->lnum + 1;
   return x;
 }
-static struct xnode* _node_text_push(struct  _yycontext *yy, const char *text) {
+static struct xnode* _node_text_push(struct _yycontext *yy, const char *text) {
   return _push_and_register(yy, _node_text(yy, text));
 }
 int node_bind(struct node *n) {
@@ -7684,7 +8556,7 @@ static char* _text_escaped(char *wp, const char *rp) {
   *wp = '\0';
   return ret;
 }
-static struct xnode* _node_text_escaped_push(struct  _yycontext *yy, const char *text) {
+static struct xnode* _node_text_escaped_push(struct _yycontext *yy, const char *text) {
   char buf[strlen(text) + 1];
   return _push_and_register(yy, _node_text(yy, _text_escaped(buf, text)));
 }
@@ -7931,6 +8803,7 @@ static int _node_bind(struct node *n) {
         rc = node_echo_setup(n);
         break;
       case NODE_TYPE_INSTALL:
+      case NODE_TYPE_INSTALL_SOURCES:
         rc = node_install_setup(n);
         break;
       case NODE_TYPE_FIND:
@@ -7941,6 +8814,9 @@ static int _node_bind(struct node *n) {
         break;
       case NODE_TYPE_CALL:
         rc = node_call_setup(n);
+        break;
+      case NODE_TYPE_FETCH_URL:
+        rc = node_fetch_url_setup(n);
         break;
     }
     switch (n->type) {
@@ -8150,14 +9026,14 @@ int script_open(const char *file, struct sctx **out) {
     if (g_env.install.enabled) {
       unit_env_set_val(root, "INSTALL_ENABLED", "1");
     }
+    unit_env_set_val(root, "INSTALL_BIN_DIR", g_env.install.bin_dir);
+    unit_env_set_val(root, "INSTALL_LIB_DIR", g_env.install.lib_dir);
+    unit_env_set_val(root, "INSTALL_DATA_DIR", g_env.install.data_dir);
+    unit_env_set_val(root, "INSTALL_INCLUDE_DIR", g_env.install.include_dir);
+    unit_env_set_val(root, "INSTALL_PKGCONFIG_DIR", g_env.install.pkgconf_dir);
+    unit_env_set_val(root, "INSTALL_MAN_DIR", g_env.install.man_dir);
     if (g_env.install.prefix_dir || g_env.install.bin_dir) {
       unit_env_set_val(root, "INSTALL_PREFIX", g_env.install.prefix_dir);
-      unit_env_set_val(root, "INSTALL_BIN_DIR", g_env.install.bin_dir);
-      unit_env_set_val(root, "INSTALL_LIB_DIR", g_env.install.lib_dir);
-      unit_env_set_val(root, "INSTALL_DATA_DIR", g_env.install.data_dir);
-      unit_env_set_val(root, "INSTALL_INCLUDE_DIR", g_env.install.include_dir);
-      unit_env_set_val(root, "INSTALL_PKGCONFIG_DIR", g_env.install.pkgconf_dir);
-      unit_env_set_val(root, "INSTALL_MAN_DIR", g_env.install.man_dir);
       if (g_env.verbose) {
         akinfo("%s: INSTALL_PREFIX=%s", root->rel_path, g_env.install.prefix_dir);
         akinfo("%s: INSTALL_BIN_DIR=%s", root->rel_path, g_env.install.bin_dir);
@@ -8356,7 +9232,7 @@ struct node* node_find_prev_sibling(struct node *n) {
   }
   return 0;
 }
-struct  node* node_find_parent_of_type(struct node *n, int type) {
+struct node* node_find_parent_of_type(struct node *n, int type) {
   for (struct node *nn = n->parent; nn; nn = nn->parent) {
     if (type == 0 || nn->type == type) {
       return nn;
@@ -8422,21 +9298,23 @@ struct node* node_consumes_resolve(
         }
       }
     }
-    unit_ch_cache_dir(unit, prevcwd);
-    for (int i = 0; i < rlist.num; ++i) {
-      const char *cv = *(char**) ulist_get(&rlist, i);
-      struct node *pn = node_by_product(n, cv, pathbuf);
-      if (pn) {
-        node_build(pn);
-      }
-      if (path_is_exist(pathbuf)) {
-        if (on_resolved) {
-          on_resolved(pathbuf, opq);
+    if ((n->flags & NODE_FLG_PREFER_SRC_RESOLVING) == 0) {
+      unit_ch_cache_dir(unit, prevcwd);
+      for (int i = 0; i < rlist.num; ++i) {
+        const char *cv = *(char**) ulist_get(&rlist, i);
+        struct node *pn = node_by_product(n, cv, pathbuf);
+        if (pn) {
+          node_build(pn);
         }
-        ulist_remove(&rlist, i--);
+        if (path_is_exist(pathbuf)) {
+          if (on_resolved) {
+            on_resolved(pathbuf, opq);
+          }
+          ulist_remove(&rlist, i--);
+        }
       }
+      akcheck(chdir(prevcwd));
     }
-    akcheck(chdir(prevcwd));
     if (rlist.num) {
       unit_ch_src_dir(unit, prevcwd);
       for (int i = 0; i < rlist.num; ++i) {
