@@ -5,8 +5,8 @@
 # Autark: aec5320de2e44ef5a0338f9ea990ed2a
 # https://github.com/Softmotions/autark
 
-META_VERSION=0.9.13
-META_REVISION=6c1150c
+META_VERSION=0.9.16
+META_REVISION=06dfe70
 cd "$(cd "$(dirname "$0")"; pwd -P)"
 
 prev_arg=""
@@ -52,6 +52,8 @@ elif command -v clang >/dev/null 2>&1; then
   COMPILER=clang
 elif command -v gcc >/dev/null 2>&1; then
   COMPILER=gcc
+elif command -v cc >/dev/null 2>&1; then
+  COMPILER=cc
 else
   echo "No suitable C compiler found" >&2
   exit 1
@@ -67,8 +69,8 @@ mkdir -p ${AUTARK_HOME}
 cat <<'a292effa503b' > ${AUTARK_HOME}/autark.c
 #ifndef CONFIG_H
 #define CONFIG_H
-#define META_VERSION "0.9.13"
-#define META_REVISION "6c1150c"
+#define META_VERSION "0.9.16"
+#define META_REVISION "06dfe70"
 #define MACRO_MAX_RECURSIVE_CALLS 128
 #endif
 #define _AMALGAMATE_
@@ -633,6 +635,7 @@ const char* path_join_path_pool(struct pool *pool, const char *dir, const char *
 #define AUTARK_CACHE_OVERLAY_DIR_ENV "AUTARK_CACHE_OVERLAY_DIR" // Project cache overlay directory
 #define AUTARK_UNIT_ENV              "AUTARK_UNIT"              // Path relative to AUTARK_ROOT_DIR of build process
                                                                 // unit executed
+#define AUTARK_INTERACTIVE_ENV       "AUTARK_INTERACTIVE"      // Autark is launched in interactive terminal
 #define AUTARK_INSTALL_SRC_DEPS_ENV "AUTARK_INSTALL_SRC_DEPS"   // Install src with deps.
 #define AUTARK_COMPILE_COMMANDS_ENV "AUTARK_COMPILE_COMMANDS"   // Path to compile commands file.
 #define AUTARK_VERBOSE_ENV "AUTARK_VERBOSE"                     // Autark verbose env key
@@ -717,6 +720,7 @@ void unit_ch_cache_dir(struct unit*, char *prevcwd);
 void unit_ch_src_dir(struct unit*, char *prevcwd);
 void unit_env_set_val(struct unit*, const char *key, const char *val);
 void unit_env_set_node(struct unit*, const char *key, struct node *n, unsigned tag);
+struct unit_env_item* unit_env_get_item(struct unit *u, const char *key);
 struct node* unit_env_get_node(struct unit *u, const char *key, unsigned *out_tag);
 const char* unit_env_get(struct node *n, const char *key);
 const char* unit_env_get_raw(struct unit *u, const char *key);
@@ -901,6 +905,7 @@ struct node {
   // Recursive set
   struct {
     struct node *n;
+    const char *val; /// Prior raw value (e.g. from -D) preserved for self-referencing defaults
     bool active;
   } recur_next;
   struct sctx *ctx;
@@ -2849,6 +2854,9 @@ int path_rm_cache(const char *path) {
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
       continue;
     }
+    if (strcmp(name, "compile_commands.json") == 0) { // Keep compile commands.
+      continue;
+    }
     snprintf(child, sizeof(child), "%s/%s", path, name);
     if (!_is_autark_dist_root(child)) {
       _rm_dir_recursive(child);
@@ -3969,6 +3977,10 @@ static void _set_dispose(struct node *n) {
     free(n->impl);
   }
   n->impl = 0;
+  if (n->recur_next.val) {
+    free((void*) n->recur_next.val);
+    n->recur_next.val = 0;
+  }
 }
 static bool _set_is_let(struct node *n) {
   return strcmp(n->value, "let") == 0;
@@ -3994,10 +4006,16 @@ static void _set_init_impl(struct node *n) {
     node_warn(n, "No name specified for 'set' directive");
     return;
   }
-  unsigned tag = 0;
-  struct node *nn = unit_env_get_node(unit, key, &tag);
-  if (nn && nn != n) {
-    n->recur_next.n = nn;
+  struct unit_env_item *item = unit_env_get_item(unit, key);
+  if (item) {
+    if (item->n && item->n != n) {
+      n->recur_next.n = item->n;
+    } else if (item->val && !n->recur_next.val) {
+      // Preserve a pre-existing raw value (e.g. from -D) so that a
+      // self-referencing default like `set { X ${X def} }` resolves to
+      // the caller-provided value instead of silently falling back to def.
+      n->recur_next.val = xstrdup(item->val);
+    }
   }
   unit_env_set_node(unit, key, n, 0);
 }
@@ -4028,8 +4046,13 @@ static void _set_build(struct node *n) {
   }
 }
 static const char* _set_value_get(struct node *n) {
-  if (n->recur_next.active && n->recur_next.n) {
-    return _set_value_get(n->recur_next.n);
+  if (n->recur_next.active) {
+    if (n->recur_next.n) {
+      return _set_value_get(n->recur_next.n);
+    }
+    if (n->recur_next.val) {
+      return n->recur_next.val;
+    }
   }
   n->recur_next.active = true;
   struct node_foreach *fe = node_find_parent_foreach(n);
@@ -6897,6 +6920,9 @@ struct node* unit_env_get_node(struct unit *u, const char *key, unsigned *out_ta
   }
   return 0;
 }
+struct unit_env_item* unit_env_get_item(struct unit *u, const char *key) {
+  return map_get(u->env, key);
+}
 const char* unit_env_get_raw(struct unit *u, const char *key) {
   struct unit_env_item *item = map_get(u->env, key);
   if (item) {
@@ -7186,6 +7212,9 @@ void autark_build_prepare(const char *script_path) {
   }
   setenv(AUTARK_ROOT_DIR_ENV, g_env.project.root_dir, 1);
   setenv(AUTARK_CACHE_DIR_ENV, g_env.project.cache_dir, 1);
+  if (isatty(STDIN_FILENO)) {
+    setenv(AUTARK_INTERACTIVE_ENV, "1", 1);
+  }
   if ((g_env.install.flags & INSTALL_FLG_SRC_WITH_DEPS) || getenv(AUTARK_INSTALL_SRC_DEPS_ENV)) {
     g_env.install.enabled = true;
     g_env.install.flags |= INSTALL_FLG_SRC_WITH_DEPS;
