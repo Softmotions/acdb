@@ -5,8 +5,8 @@
 # Autark: aec5320de2e44ef5a0338f9ea990ed2a
 # https://github.com/Softmotions/autark
 
-META_VERSION=0.9.16
-META_REVISION=06dfe70
+META_VERSION=0.10.0
+META_REVISION=8210a9d
 cd "$(cd "$(dirname "$0")"; pwd -P)"
 
 prev_arg=""
@@ -69,8 +69,8 @@ mkdir -p ${AUTARK_HOME}
 cat <<'a292effa503b' > ${AUTARK_HOME}/autark.c
 #ifndef CONFIG_H
 #define CONFIG_H
-#define META_VERSION "0.9.16"
-#define META_REVISION "06dfe70"
+#define META_VERSION "0.10.0"
+#define META_REVISION "8210a9d"
 #define MACRO_MAX_RECURSIVE_CALLS 128
 #endif
 #define _AMALGAMATE_
@@ -80,6 +80,7 @@ cat <<'a292effa503b' > ${AUTARK_HOME}/autark.c
 #define _DEFAULT_SOURCE
 #endif
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -362,30 +363,33 @@ struct map_iter {
   uint32_t    bucket;
   int32_t     entry;
 };
+/// Key/Value free callback which uses standard `free()` deallocation.
+/// @param key Pointer to key or zero.
+/// @param val Pointer to value or zero.
 void map_kv_free(void *key, void *val);
+/// Key free callback which uses standard `free()` deallocation.
+/// @param key Pointer to key or zero.
+/// @param val Value, ignored.
 void map_k_free(void *key, void *val);
-struct map* map_create(
-  int (*cmp_fn)(const void*, const void*),
-  uint32_t (*hash_fn)(const void*),
-  void (*kv_free_fn)(void*, void*));
-void map_destroy(struct map*);
-struct map* map_create_u64(void (*kv_free_fn)(void*, void*));
-struct map* map_create_u32(void (*kv_free_fn)(void*, void*));
+/// Creates a map with `strcmp()` keys.
+/// @param kv_free_fn Callback used to release keys and values on removal,
+///        zero means that the map does not own stored keys and values.
 struct map* map_create_str(void (*kv_free_fn)(void*, void*));
-void map_put(struct map*, void *key, void *val);
-void map_put_u32(struct map*, uint32_t key, void *val);
-void map_put_u64(struct map*, uint64_t key, void *val);
+void map_destroy(struct map*);
+/// Makes a copy of key (`strdup()`) then puts key/value pair into the map.
+/// @note Key memory is expected to be released by `kv_free_fn` given to `map_create_str()`.
 void map_put_str(struct map*, const char *key, void *val);
+/// Puts key/value pair into the map without copying the key.
+/// @note Key memory is expected to be released by `kv_free_fn` given to `map_create_str()`.
 void map_put_str_no_copy(struct map*, const char *key, void *val);
-int map_remove(struct map*, const void *key);
-int map_remove_u64(struct map*, uint64_t key);
-int map_remove_u32(struct map*, uint32_t key);
-void* map_get(struct map*, const void *key);
-void* map_get_u64(struct map*, uint64_t key);
-void* map_get_u32(struct map*, uint32_t key);
-uint32_t map_count(const struct map*);
-void map_clear(struct map*);
+/// Removes the given key from the map.
+/// @return `1` if the key has been found and removed, `0` otherwise.
+int map_remove(struct map*, const char *key);
+/// @return Value associated with the given key or zero.
+void* map_get(struct map*, const char *key);
 void map_iter_init(struct map*, struct map_iter*);
+/// Advances the iterator to the next entry.
+/// @return `1` if the iterator points to an entry, `0` at the end of the map.
 int map_iter_next(struct map_iter*);
 #endif
 #ifndef UTILS_H
@@ -487,7 +491,12 @@ int utils_file_write_buf(const char *path, const char *buf, size_t len, bool app
 int utils_copy_file_streams(FILE *src, FILE *dst);
 int utils_copy_file(const char *src, const char *dst);
 int utils_copy_dir(const char *src, const char *dst);
+/// Copies directory `src` into `dst` transforming permissions of created
+/// files and directories with `mode_fn`. If `mode_fn` is 0, source permissions
+/// are preserved as is.
+int utils_copy_dir_mode(const char *src, const char *dst, mode_t (*mode_fn)(mode_t));
 int utils_copy_dir_to_parent(const char *src, const char *dst);
+int utils_copy_dir_to_parent_mode(const char *src, const char *dst, mode_t (*mode_fn)(mode_t));
 int utils_rename_file(const char *src, const char *dst);
 void utils_split_values_add(const char *v, struct xstr *xstr);
 int utils_fd_make_non_blocking(int fd);
@@ -629,16 +638,21 @@ const char* path_join_path_pool(struct pool *pool, const char *dir, const char *
 #define AUTARK_FETCHED_REG       ".autark-fetched"
 #define AUTARK_FETCHED_REG_DIST  ".autark-fetched-dist"
 #define AUTARK_FETCH_DEP         ".autark-fetch-dep"
+#define AUTARK_EXTERNS_REG       ".autark-externs"
 #define AUTARK_COMPILE_COMMANDS  ".compile_commands"
 #define AUTARK_ROOT_DIR_ENV          "AUTARK_ROOT_DIR"          // Project root directory
 #define AUTARK_CACHE_DIR_ENV         "AUTARK_CACHE_DIR"         // Project cache directory
 #define AUTARK_CACHE_OVERLAY_DIR_ENV "AUTARK_CACHE_OVERLAY_DIR" // Project cache overlay directory
+#define AUTARK_EXTERNS_DIR_ENV       "AUTARK_EXTERNS_DIR"       // Build wide store of fetched external projects
+#define AUTARK_BUILD_ID_ENV          "AUTARK_BUILD_ID"          // Id of the build shared by the whole build tree
 #define AUTARK_UNIT_ENV              "AUTARK_UNIT"              // Path relative to AUTARK_ROOT_DIR of build process
                                                                 // unit executed
-#define AUTARK_INTERACTIVE_ENV       "AUTARK_INTERACTIVE"      // Autark is launched in interactive terminal
+#define AUTARK_INTERACTIVE_ENV      "AUTARK_INTERACTIVE"        // Autark is launched in interactive terminal
 #define AUTARK_INSTALL_SRC_DEPS_ENV "AUTARK_INSTALL_SRC_DEPS"   // Install src with deps.
 #define AUTARK_COMPILE_COMMANDS_ENV "AUTARK_COMPILE_COMMANDS"   // Path to compile commands file.
-#define AUTARK_VERBOSE_ENV "AUTARK_VERBOSE"                     // Autark verbose env key
+#define AUTARK_VERBOSE_ENV   "AUTARK_VERBOSE"                // Autark verbose env key
+#define AUTARK_TARGET_ENV    "AUTARK_TARGET"                 // Target toolchain id of cross build
+#define AUTARK_TOOLCHAIN_ENV "AUTARK_TOOLCHAIN"              // Path to target toolchain descriptor
 #define UNIT_FLG_ROOT    0x01U // Project root unit
 #define UNIT_FLG_SRC_CWD 0x02U // Set project source dir as unit CWD
 #define UNIT_FLG_NO_CWD  0x04U // Do not change CWD for unit
@@ -668,6 +682,7 @@ struct unit_ctx {
   struct unit *unit;
   unsigned     flags;
 };
+struct toolchain;
 /// Global env
 struct env {
   const char  *cwd;
@@ -675,14 +690,18 @@ struct env {
   int verbose;
   int max_parallel_jobs;            // Max number of allowed parallel jobs.
   struct {
-    const char *root_dir;           // Project root source dir. Not zero.
-    const char *cache_dir;          // Project artifacts cache dir. Not zero.
-    const char *cache_overlay_dir;  // Overlay data dir for autark cache. Can be zero.
-    bool cleanup;                   // Clean project cache before build
-    bool compile_commands;          // Generate compile_commands.json database.
-    bool compile_commands_own;      // We own compile commands file.
-    bool prepared;                  // Autark build prepared
-    struct xstr *options;           // Ask option values
+    const char *root_dir;             // Project root source dir. Not zero.
+    const char *cache_dir;            // Project artifacts cache dir. Not zero.
+    const char *cache_overlay_dir;    // Overlay data dir for autark cache. Can be zero.
+    const char *externs_dir;          // Store dir shared by the whole build tree. Not zero.
+    const char *build_id;             // Id of the build shared by the whole build tree. Not zero.
+    bool cleanup;                     // Clean project cache before build
+    bool compile_commands;            // Generate compile_commands.json database.
+    bool compile_commands_own;        // We own compile commands file.
+    bool prepared;                    // Autark build prepared
+    const char       *toolchain_path; // Path to target toolchain descriptor. Can be zero.
+    struct toolchain *toolchain;      // Resolved target toolchain. Can be zero.
+    struct xstr      *options;        // Ask option values
   } project;
   struct {
     const char *prefix_dir;  // Absolute path to install prefix dir.
@@ -776,11 +795,157 @@ struct fetchreg;
 struct fetcherg_entry {
   const char *url;
   const char *target;
+  const char *build_id; /// Build that produced the entry. Can be zero.
 };
 int fetchreg_open(const char *path, struct fetchreg **out);
 bool fetchreg_find(struct fetchreg*, const char *url, void *user_data, void (*cb)(const struct fetcherg_entry*, void*));
+void fetchreg_foreach(struct fetchreg*, void *user_data, void (*cb)(const struct fetcherg_entry*, void*));
 int fetchreg_register(struct fetchreg*, const struct fetcherg_entry*);
 void fetchreg_close(struct fetchreg*);
+#endif
+#ifndef TOOLCHAIN_H
+#define TOOLCHAIN_H
+#ifndef _AMALGAMATE_
+#include "pool.h"
+#include "ulist.h"
+#include <stdbool.h>
+#endif
+/// A single key/value pair declared by a toolchain descriptor.
+struct toolchain_var {
+  const char *key; // Normalized key name (lowercase, `-` and `.` replaced by `_`)
+  const char *var; // Published build script variable name (e.g. TOOLCHAIN_SYSROOT)
+  const char *val; // Resolved value
+};
+/// Cross compilation toolchain descriptor.
+///
+/// Descriptors are ordinary Autark DSL fragments declared as a single
+/// `toolchain { }` rule. Descriptor keys are not limited to a fixed set:
+/// every declared key is published as `TOOLCHAIN_<KEY>` (and as a process
+/// environment variable of the same name), while well known keys are also
+/// exposed under the canonical Autark names (`SYSTEM_*`, `CC`, `AR`, ...).
+struct toolchain {
+  const char *path;        // Absolute path to the descriptor file
+  const char *id;          // Target id (SYSTEM_TARGET). Defaults to the descriptor basename
+  const char *system;      // Target OS name, lowercase (SYSTEM_NAME). e.g. `linux`, `android`
+  const char *arch;        // Target CPU architecture (SYSTEM_ARCH)
+  const char *arch_alt;    // Alternative architecture name (SYSTEM_ARCH_ALT). Defaults to `arch`
+  const char *bits;        // Target bitness (SYSTEM_BITNESS_<bits>). e.g. `32`, `64`
+  const char *endian;      // Target endianness: `little` or `big`
+  const char *cc;          // Target C compiler (CC)
+  const char *cxx;         // Target C++ compiler (CXX)
+  const char *ar;          // Target archiver (AR)
+  const char *ranlib;      // Target ranlib (RANLIB)
+  const char *strip;       // Target strip (STRIP)
+  const char *pkgconf;     // Target pkg-config tool (PKGCONF)
+  const char *cflags;      // Target compiler flags (CFLAGS_TARGET)
+  const char *ldflags;     // Target linker flags (LDFLAGS_TARGET)
+  const char *host_cc;     // Host C compiler used to build build tools (HOST_CC)
+  const char *host_cxx;    // Host C++ compiler used to build build tools (HOST_CXX)
+  const char *host_ar;     // Host archiver used to build build tools (HOST_AR)
+  const char *host_cflags; // Host C compiler flags (HOST_CFLAGS)
+  const char *host_cxxflags; // Host C++ compiler flags (HOST_CXXFLAGS)
+  const char *host_ldflags; // Host linker flags (HOST_LDFLAGS)
+  const char *runner;      // Command prefix used to run target executables (emulator/adb)
+  struct ulist vars;       // All declared key/value pairs (struct toolchain_var*)
+};
+/// Object tag of build tools compiled by host-cc/host-cxx
+#define TOOLCHAIN_TAG_HOST "host"
+/// Loads and resolves the given toolchain descriptor.
+///
+/// The toolchain struct and its values are allocated in the given pool.
+/// A toolchain which is not passed to `toolchain_apply()` should be released with
+/// `toolchain_destroy()` before the pool is destroyed.
+///
+/// @param pool Pool used to allocate the toolchain and its values
+/// @param path Path to the descriptor file
+///
+/// @return Resolved toolchain
+struct toolchain* toolchain_load(struct pool *pool, const char *path);
+/// Releases heap resources of the toolchain which are not owned by its pool.
+/// The toolchain struct itself is released together with the pool given to `toolchain_load()`.
+void toolchain_destroy(struct toolchain *tc);
+/// Loads the toolchain descriptor selected by `--toolchain`/`AUTARK_TOOLCHAIN` (if any)
+/// and publishes its facts into the root build unit.
+void toolchain_activate(void);
+/// Publishes resolved toolchain facts into the root build unit environment
+/// and into the process environment, so check scripts and nested builds see them.
+void toolchain_apply(struct toolchain *tc);
+/// Looks up a raw descriptor value by key.
+///
+/// Key lookup is case insensitive and treats `-`, `.` and `_` as the same
+/// separator, so `host-cc`, `host_cc` and `HOST.CC` are equivalent.
+///
+/// @return Declared value or zero if the key is not declared
+const char* toolchain_var_get(struct toolchain *tc, const char *key);
+/// @return Id of the active target toolchain or zero for a native build.
+const char* toolchain_id(void);
+/// @return Tag of objects compiled in the given scope.
+///         0 for native target scope (no tagging is performed).
+const char* toolchain_object_tag(bool host_scope);
+/// Writes (or removes when `tag` is zero) the toolchain tag sidecar of an object file.
+int toolchain_object_tag_write(const char *obj_path, const char *tag);
+/// Checks that the object file belongs to the given compilation scope.
+///
+/// @return Pointer to `buf` holding the object tag on mismatch, zero if the
+///         object is compatible with the scope or carries no tag.
+const char* toolchain_object_check(const char *obj_path, bool host_scope, char *buf, size_t buflen);
+#endif
+#ifndef CXX_MODULES_H
+#define CXX_MODULES_H
+#ifndef _AMALGAMATE_
+#include "script.h"
+#include "spawn.h"
+#include "deps.h"
+#include <stdbool.h>
+#endif
+/// C++20 modules compilation support of `cxx`/`host-cxx` rules.
+///
+/// Module interface units are compiled before all other sources of the rule (in
+/// their declaration order) and produce a Binary Module Interface (BMI) in the
+/// project cache. BMI lookup of importers is compiler specific:
+///
+///  - clang: `-fprebuilt-module-path=<dir>`, BMI files are named after the
+///    module name (`<name>.pcm`).
+///  - gcc: a single module map file (`-fmodule-mapper`) mapping module names to
+///    BMI files (`<name>.gcm`).
+///
+/// Module partitions are not supported.
+struct cxx_modules;
+/// @return true if `path` has an extension of a C++20 module unit
+bool cxx_modules_is_module_path(const char *path);
+/// Creates module compilation state of a C++ rule.
+///
+/// @param n Rule node
+/// @param compiler C++ compiler command
+/// @param tag Toolchain object tag of the compilation scope. Zero for the native target
+struct cxx_modules* cxx_modules_create(struct node *n, const char *compiler, const char *tag);
+/// Destroys module compilation state. Registered modules remain in the project
+/// wide module registry, which is released by `cxx_modules_dispose()`.
+void cxx_modules_destroy(struct cxx_modules*);
+/// Releases the project wide module registry.
+///
+/// The registry refers to rule nodes of the current build environment, so it is
+/// released together with that environment (`autark_dispose()`) and is recreated
+/// on demand. Safe to call multiple times.
+void cxx_modules_dispose(void);
+/// Scans the source and registers it as a module unit if it declares a module.
+///
+/// @param required Source is explicitly declared as module unit, so the
+///                 declaration is mandatory (regardless of the extension)
+///
+/// @return true if the source is a module interface unit (produces a BMI)
+bool cxx_modules_add_source(struct cxx_modules*, const char *src, bool required);
+/// @return true if the absolute source path is a module interface unit
+bool cxx_modules_is_interface(struct cxx_modules*, const char *src);
+/// Writes the module map file (gcc only) before compilation.
+void cxx_modules_prepare(struct cxx_modules*);
+/// Appends module related compiler arguments. Must be called before the
+/// `-c <source>` arguments are added to the spawn.
+///
+/// @param src Absolute source path
+void cxx_modules_args_add(struct cxx_modules*, struct spawn*, const char *src);
+/// Registers BMIs and the module map file as node dependencies.
+void cxx_modules_deps_add(struct cxx_modules*, struct deps *deps);
 #endif
 #ifndef NODES_H
 #define NODES_H
@@ -821,6 +986,10 @@ void macro_unregister_call(struct node*);
 #ifndef _AMALGAMATE_
 #include <stdbool.h>
 #endif
+/// Exit code of `autark fetch-plan` telling that a resource fetch is required.
+#define AUTARK_FETCH_PENDING_RC 3
+/// Exit code of `autark fetch-plan` telling that the fetch dir is unusable.
+#define AUTARK_FETCH_REJECTED_RC 4
 void autark_init(void);
 void autark_run(int argc, const char **argv);
 void autark_dispose(void);
@@ -863,6 +1032,7 @@ void autark_build_prepare(const char *script_path);
 #define NODE_TYPE_MACRO           0x800000U
 #define NODE_TYPE_CALL            0x1000000U
 #define NODE_TYPE_INSTALL_SOURCES 0x2000000U
+struct unit;
 #define NODE_FLG_BOUND 0x01U
 #define NODE_FLG_INIT  0x02U
 #define NODE_FLG_SETUP 0x04U
@@ -925,6 +1095,19 @@ struct sctx {
 };
 int script_open(const char *file, struct sctx **out);
 int script_include(struct node *parent, const char *file, struct node **out);
+/// Parses an arbitrary Autark DSL fragment (e.g. a toolchain descriptor) into a
+/// standalone script tree.
+///
+/// The tree gets its own unit created under `unit_path` in the project cache,
+/// whose source directory (`SS{}`) is the directory of the fragment file.
+/// The unit is owned by `unit_pool` (g_env.pool is used when it is zero), so
+/// destroying that pool unregisters the unit.
+int script_open_fragment(
+  const char *file,
+  const char *unit_path,
+  struct pool *unit_pool,
+  struct unit **out_unit,
+  struct sctx **out);
 void script_build(struct sctx*);
 void script_close(struct sctx**);
 void script_dump(struct sctx*, struct xstr *out);
@@ -1661,88 +1844,60 @@ void _akfatal_va(const char *file, int line, int code, const char *fmt, va_list 
 #include "alloc.h"
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stddef.h>
 #endif
-#define MIN_BUCKETS 64
-#define STEPS       4
+/// Initial number of entry slots.
+#define INITIAL_CAPACITY 64u
+/// Maximal number of entry slots: keeps slot indices within the `int32_t` range
+/// of `struct map_iter::entry` and prevents capacity arithmetic overflows.
+#define MAX_CAPACITY (1u << 30)
+/// The entries table is grown once the number of entries reaches `capacity * 3 / 4`.
+#define LOAD_PERCENT 3u
+/// The entries table is shrunk once the number of entries falls below `capacity / 8`.
+#define SHRINK_DIVISOR 8u
+/// Hash map entry, also used as an entries table slot: an empty slot is
+/// marked by `hash == 0` and terminates the probe sequence.
+///
+/// `hash` keeps a normalized key hash (see `_map_nhash()`), which allows to
+/// reject most candidates without calling `strcmp()`.
 struct _map_entry {
   void    *key;
   void    *val;
   uint32_t hash;
 };
-struct _map_bucket {
-  struct _map_entry *entries;
-  uint32_t used;
-  uint32_t total;
-};
+/// Entries are stored in a single flat, power of two sized table and are
+/// resolved with linear probing. Removals shift the rest of the probe cluster
+/// backwards, so the table holds no tombstones and any empty slot is a valid
+/// probe terminator.
 struct map {
-  uint32_t count;
-  uint32_t buckets_mask;
-  struct _map_bucket *buckets;
-  int      (*cmp_fn)(const void*, const void*);
-  uint32_t (*hash_key_fn)(const void*);
-  void     (*kv_free_fn)(void*, void*);
-  int int_key_as_pointer_value;
+  struct _map_entry *entries;
+  uint32_t capacity;       ///< Number of slots: a power of two.
+  uint32_t capacity_mask;  ///< `capacity - 1`
+  uint32_t count;          ///< Number of entries stored.
+  void (*kv_free_fn)(void*, void*);
 };
 static void _map_noop_kv_free(void *key, void *val) {
 }
-static void _map_noop_uint64_kv_free(void *key, void *val) {
-  if (key) {
-    free(key);
-  }
+void map_kv_free(void *key, void *val) {
+  free(key);
+  free(val);
 }
-static inline uint32_t _map_n_buckets(struct map *hm) {
-  return hm->buckets_mask + 1;
+void map_k_free(void *key, void *val) {
+  free(key);
 }
-static int _map_ptr_cmp(const void *v1, const void *v2) {
-  return v1 > v2 ? 1 : v1 < v2 ? -1 : 0;
+/// Maximal number of entries the table of given capacity can hold.
+static inline uint32_t _map_max_load(uint32_t capacity) {
+  return capacity - capacity / (LOAD_PERCENT + 1);
 }
-static int _map_uint32_cmp(const void *v1, const void *v2) {
-  intptr_t p1 = (intptr_t) v1;
-  intptr_t p2 = (intptr_t) v2;
-  return p1 > p2 ? 1 : p1 < p2 ? -1 : 0;
+/// Normalizes the key hash so that `0` is reserved to mark an empty slot.
+static inline uint32_t _map_nhash(uint32_t hash) {
+  hash += 1;
+  return hash ? hash : 1;
 }
-static int _map_uint64_cmp(const void *v1, const void *v2) {
-  if (sizeof(uintptr_t) >= sizeof(uint64_t)) {
-    intptr_t p1 = (intptr_t) v1;
-    intptr_t p2 = (intptr_t) v2;
-    return p1 > p2 ? 1 : p1 < p2 ? -1 : 0;
-  } else {
-    uint64_t l1, l2;
-    memcpy(&l1, v1, sizeof(l1));
-    memcpy(&l2, v2, sizeof(l2));
-    return l1 > l2 ? 1 : l1 < l2 ? -1 : 0;
-  }
-}
-static inline uint32_t _map_hash_uint32(uint32_t x) {
-  x ^= x >> 16;
-  x *= 0x85ebca6bU;
-  x ^= x >> 13;
-  x *= 0xc2b2ae35U;
-  x ^= x >> 16;
-  return x;
-}
-static inline uint32_t _map_hash_uint64(uint64_t x) {
-  x ^= x >> 33;
-  x *= 0xff51afd7ed558ccdULL;
-  x ^= x >> 33;
-  x *= 0xc4ceb9fe1a85ec53ULL;
-  x ^= x >> 33;
-  return x;
-}
-static inline uint32_t _map_hash_uint64_key(const void *key) {
-  return _map_hash_uint64((uintptr_t) key);
-}
-static inline uint32_t _map_hash_uint64_key_read(const void *key) {
-  uint64_t lv = 0;
-  memcpy(&lv, key, sizeof(key));
-  return _map_hash_uint64(lv);
-}
-static inline uint32_t _map_hash_uint32_key(const void *key) {
-  return _map_hash_uint32((uintptr_t) key);
-}
-static inline uint32_t _map_hash_buf_key(const void *key) {
+/// Hash of a zero terminated string key (FNV-1a).
+static inline uint32_t _map_hash_buf_key(const char *key) {
   const char *str = key;
   uint32_t hash = 2166136261U;
   while (*str) {
@@ -1752,259 +1907,170 @@ static inline uint32_t _map_hash_buf_key(const void *key) {
   }
   return hash;
 }
-static struct _map_entry* _map_entry_add(struct map *hm, void *key, uint32_t hash) {
-  struct _map_entry *entry;
-  struct _map_bucket *bucket = hm->buckets + (hash & hm->buckets_mask);
-  if (bucket->used + 1 >= bucket->total) {
-    if (UINT32_MAX - bucket->total < STEPS) {
-      akfatal(AK_ERROR_OVERFLOW, 0, 0, 0);
+static struct _map_entry* _map_entries_alloc(uint32_t capacity) {
+  return xcalloc(capacity, sizeof(struct _map_entry));
+}
+/// Looks up the entry with the given key.
+/// @param nhash Normalized key hash, see `_map_nhash()`.
+/// @return Entry pointer or zero if there is no such key.
+static struct _map_entry* _map_entry_find(struct map *hm, const char *key, uint32_t nhash) {
+  struct _map_entry *entries = hm->entries;
+  uint32_t mask = hm->capacity_mask;
+  for (uint32_t i = nhash & mask; ; i = (i + 1) & mask) {
+    struct _map_entry *entry = entries + i;
+    // An empty slot terminates the probe sequence: removals never leave holes.
+    if (!entry->hash) {
+      return 0;
     }
-    uint32_t new_total = bucket->total + STEPS;
-    struct _map_entry *new_entries = xrealloc(bucket->entries, new_total * sizeof(new_entries[0]));
-    bucket->entries = new_entries;
-    bucket->total = new_total;
-  }
-  entry = bucket->entries;
-  for (struct _map_entry *end = entry + bucket->used; entry < end; ++entry) {
-    if ((hash == entry->hash) && (hm->cmp_fn(key, entry->key) == 0)) {
+    if ((entry->hash == nhash) && (strcmp(key, entry->key) == 0)) {
       return entry;
     }
   }
-  ++bucket->used;
-  ++hm->count;
-  entry->hash = hash;
+}
+/// Returns an entry for the given key: either an existing one, or a newly
+/// claimed (zeroed) slot. Increments `hm->count` when a new slot is claimed.
+///
+/// The caller is responsible for keeping at least one empty slot in the table.
+/// @param nhash Normalized key hash, see `_map_nhash()`.
+/// @param created Set to `true` if a new slot has been claimed.
+static struct _map_entry* _map_entry_put(struct map *hm, const char *key, uint32_t nhash, bool *created) {
+  struct _map_entry *entries = hm->entries;
+  uint32_t mask = hm->capacity_mask;
+  for (uint32_t i = nhash & mask; ; i = (i + 1) & mask) {
+    struct _map_entry *entry = entries + i;
+    if (!entry->hash) {
+      entry->hash = nhash;
+      entry->key = 0;
+      entry->val = 0;
+      ++hm->count;
+      *created = true;
+      return entry;
+    }
+    if ((entry->hash == nhash) && (strcmp(key, entry->key) == 0)) {
+      *created = false;
+      return entry;
+    }
+  }
+}
+/// Reallocates the entries table to the given capacity and re-places all entries.
+/// Existing entries are moved as is: `kv_free_fn` is not called.
+static void _map_resize(struct map *hm, uint32_t capacity) {
+  akassert(!(capacity & (capacity - 1)));
+  akassert(capacity != hm->capacity);
+  akassert((capacity >= INITIAL_CAPACITY) && (capacity <= MAX_CAPACITY));
+  struct _map_entry *entries_new = _map_entries_alloc(capacity);
+  struct _map_entry *entries_old = hm->entries;
+  uint32_t mask_new = capacity - 1;
+  uint32_t count = 0;
+  for (struct _map_entry *entry = entries_old, *end = entries_old + hm->capacity; entry < end; ++entry) {
+    if (!entry->hash) {
+      continue;
+    }
+    uint32_t i = entry->hash & mask_new;
+    while (entries_new[i].hash) {
+      i = (i + 1) & mask_new;
+    }
+    entries_new[i] = *entry;
+    ++count;
+  }
+  akassert(count == hm->count);
+  (void) count;
+  hm->entries = entries_new;
+  hm->capacity = capacity;
+  hm->capacity_mask = mask_new;
+  free(entries_old);
+}
+/// Makes sure the table can hold one more entry.
+static void _map_reserve_entry(struct map *hm) {
+  if (hm->count + 1 <= _map_max_load(hm->capacity)) {
+    return;
+  }
+  if (hm->capacity >= MAX_CAPACITY) {
+    akfatal(AK_ERROR_OVERFLOW, 0, 0);
+  }
+  _map_resize(hm, hm->capacity * 2);
+}
+/// Removes the entry from the table and shifts the rest of its probe cluster
+/// backwards, so the table keeps no tombstones.
+/// @note Invalidates all entry pointers, including the given one.
+static void _map_entry_remove(struct map *hm, struct _map_entry *entry) {
+  hm->kv_free_fn(entry->key, entry->val);
+  --hm->count;
+  struct _map_entry *entries = hm->entries;
+  uint32_t mask = hm->capacity_mask;
+  uint32_t hole = (uint32_t) (entry - entries);
+  for (uint32_t i = (hole + 1) & mask; entries[i].hash; i = (i + 1) & mask) {
+    uint32_t home = entries[i].hash & mask;
+    // The entry can be moved back only if the hole is located on its probe path,
+    // otherwise moving it would make the entry unreachable for lookups.
+    if (((hole - home) & mask) <= ((i - home) & mask)) {
+      entries[hole] = entries[i];
+      hole = i;
+    }
+  }
+  entry = entries + hole;
+  entry->hash = 0;
   entry->key = 0;
   entry->val = 0;
-  return entry;
-}
-static struct _map_entry* _map_entry_find(struct map *hm, const void *key, uint32_t hash) {
-  struct _map_bucket *bucket = hm->buckets + (hash & hm->buckets_mask);
-  struct _map_entry *entry = bucket->entries;
-  for (struct _map_entry *end = entry + bucket->used; entry < end; ++entry) {
-    if (hash == entry->hash && hm->cmp_fn(key, entry->key) == 0) {
-      return entry;
-    }
-  }
-  return 0;
-}
-static void _map_rehash(struct map *hm, uint32_t num_buckets) {
-  struct _map_bucket *buckets = xcalloc(num_buckets, sizeof(*buckets));
-  struct _map_bucket *bucket,
-                     *bucket_end = hm->buckets + _map_n_buckets(hm);
-  struct map hm_copy = *hm;
-  hm_copy.count = 0;
-  hm_copy.buckets_mask = num_buckets - 1;
-  hm_copy.buckets = buckets;
-  for (bucket = hm->buckets; bucket < bucket_end; ++bucket) {
-    struct _map_entry *entry_old = bucket->entries;
-    if (entry_old) {
-      struct _map_entry *entry_old_end = entry_old + bucket->used;
-      for ( ; entry_old < entry_old_end; ++entry_old) {
-        struct _map_entry *entry_new = _map_entry_add(&hm_copy,
-                                                      entry_old->key,
-                                                      entry_old->hash);
-        entry_new->key = entry_old->key;
-        entry_new->val = entry_old->val;
-      }
-    }
-  }
-  for (bucket = hm->buckets; bucket < bucket_end; ++bucket) {
-    free(bucket->entries);
-  }
-  free(hm->buckets);
-  hm->buckets = buckets;
-  hm->buckets_mask = num_buckets - 1;
-  return;
-}
-static void _map_entry_remove(struct map *hm, struct _map_bucket *bucket, struct _map_entry *entry) {
-  hm->kv_free_fn(hm->int_key_as_pointer_value ? 0 : entry->key, entry->val);
-  if (bucket->used > 1) {
-    struct _map_entry *entry_last = bucket->entries + bucket->used - 1;
-    if (entry != entry_last) {
-      memcpy(entry, entry_last, sizeof(*entry));
-    }
-  }
-  --bucket->used;
-  --hm->count;
-  if ((hm->buckets_mask > MIN_BUCKETS - 1) && (hm->count < hm->buckets_mask / 2)) {
-    _map_rehash(hm, _map_n_buckets(hm) / 2);
-  } else {
-    uint32_t steps_used = bucket->used / STEPS;
-    uint32_t steps_total = bucket->total / STEPS;
-    if (steps_used + 1 < steps_total) {
-      struct _map_entry *entries_new = realloc(bucket->entries,
-                                               ((size_t) steps_used + 1) * STEPS * sizeof(entries_new[0]));
-      if (entries_new) {
-        bucket->entries = entries_new;
-        bucket->total = (steps_used + 1) * STEPS;
-      }
-    }
+  if ((hm->capacity > INITIAL_CAPACITY) && (hm->count < hm->capacity / SHRINK_DIVISOR)) {
+    _map_resize(hm, hm->capacity / 2);
   }
 }
-void map_kv_free(void *key, void *val) {
-  free(key);
-  free(val);
-}
-void map_k_free(void *key, void *val) {
-  free(key);
-}
-struct map* map_create(
-  int (*cmp_fn)(const void*, const void*),
-  uint32_t (*hash_key_fn)(const void*),
-  void (*kv_free_fn)(void*, void*)) {
-  if (!hash_key_fn) {
-    return 0;
+static void _map_put(struct map *hm, const char *key, void *val) {
+  uint32_t nhash = _map_nhash(_map_hash_buf_key(key));
+  // Reserve space before the lookup: a `put` of an already existing key may grow
+  // the table one step earlier than strictly needed, but it keeps the insertion
+  // path to a single probe sequence.
+  _map_reserve_entry(hm);
+  bool created;
+  struct _map_entry *entry = _map_entry_put(hm, key, nhash, &created);
+  if (!created) {
+    hm->kv_free_fn(entry->key, entry->val);
   }
-  if (!cmp_fn) {
-    cmp_fn = _map_ptr_cmp;
-  }
+  entry->key = (void*) key;
+  entry->val = val;
+}
+struct map* map_create_str(void (*kv_free_fn)(void*, void*)) {
   if (!kv_free_fn) {
     kv_free_fn = _map_noop_kv_free;
   }
   struct map *hm = xmalloc(sizeof(*hm));
-  hm->buckets = xcalloc(MIN_BUCKETS, sizeof(hm->buckets[0]));
-  hm->cmp_fn = cmp_fn;
-  hm->hash_key_fn = hash_key_fn;
-  hm->kv_free_fn = kv_free_fn;
-  hm->buckets_mask = MIN_BUCKETS - 1;
+  hm->entries = _map_entries_alloc(INITIAL_CAPACITY);
+  hm->capacity = INITIAL_CAPACITY;
+  hm->capacity_mask = INITIAL_CAPACITY - 1;
   hm->count = 0;
-  hm->int_key_as_pointer_value = 0;
+  hm->kv_free_fn = kv_free_fn;
   return hm;
 }
 void map_destroy(struct map *hm) {
-  if (hm) {
-    for (struct _map_bucket *b = hm->buckets, *be = hm->buckets + _map_n_buckets(hm); b < be; ++b) {
-      if (b->entries) {
-        for (struct _map_entry *e = b->entries, *ee = b->entries + b->used; e < ee; ++e) {
-          hm->kv_free_fn(hm->int_key_as_pointer_value ? 0 : e->key, e->val);
-        }
-        free(b->entries);
-      }
-    }
-    free(hm->buckets);
-    free(hm);
-  }
-}
-struct map* map_create_u64(void (*kv_free_fn)(void*, void*)) {
-  if (!kv_free_fn) {
-    kv_free_fn = _map_noop_uint64_kv_free;
-  }
-  int key_as_pointer = 0;
-  if (sizeof(uintptr_t) >= sizeof(uint64_t)) {
-    key_as_pointer = 1;
-  }
-  struct map *hm = map_create(_map_uint64_cmp,
-                              key_as_pointer ? _map_hash_uint64_key : _map_hash_uint64_key_read,
-                              kv_free_fn);
-  if (hm) {
-    hm->int_key_as_pointer_value = key_as_pointer;
-  }
-  return hm;
-}
-struct map* map_create_u32(void (*kv_free_fn)(void*, void*)) {
-  struct map *hm = map_create(_map_uint32_cmp, _map_hash_uint32_key, kv_free_fn);
-  if (hm) {
-    hm->int_key_as_pointer_value = 1;
-  }
-  return hm;
-}
-struct map* map_create_str(void (*kv_free_fn)(void*, void*)) {
-  return map_create((int (*)(const void*, const void*)) strcmp, _map_hash_buf_key, kv_free_fn);
-}
-void map_put(struct map *hm, void *key, void *val) {
-  uint32_t hash = hm->hash_key_fn(key);
-  struct _map_entry *entry = _map_entry_add(hm, key, hash);
-  hm->kv_free_fn(hm->int_key_as_pointer_value ? 0 : entry->key, entry->val);
-  entry->key = key;
-  entry->val = val;
-  if (hm->count > hm->buckets_mask) {
-    _map_rehash(hm, _map_n_buckets(hm) * 2);
-  }
-}
-void map_put_u32(struct map *hm, uint32_t key, void *val) {
-  map_put(hm, (void*) (uintptr_t) key, val);
-}
-void map_put_u64(struct map *hm, uint64_t key, void *val) {
-  if (hm->int_key_as_pointer_value) {
-    map_put(hm, (void*) (uintptr_t) key, val);
-  } else {
-    uint64_t *kv = xmalloc(sizeof(*kv));
-    memcpy(kv, &key, sizeof(*kv));
-    map_put(hm, kv, val);
-  }
-}
-void map_put_str(struct map *hm, const char *key_, void *val) {
-  char *key = xstrdup(key_);
-  map_put(hm, key, val);
-}
-void map_put_str_no_copy(struct map *hm, const char *key, void *val) {
-  map_put(hm, (void*) key, val);
-}
-int map_remove(struct map *hm, const void *key) {
-  uint32_t hash = hm->hash_key_fn(key);
-  struct _map_bucket *bucket = hm->buckets + (hash & hm->buckets_mask);
-  struct _map_entry *entry = _map_entry_find(hm, key, hash);
-  if (entry) {
-    _map_entry_remove(hm, bucket, entry);
-    return 1;
-  } else {
-    return 0;
-  }
-}
-int map_remove_u64(struct map *hm, uint64_t key) {
-  if (hm->int_key_as_pointer_value) {
-    return map_remove(hm, (void*) (uintptr_t) key);
-  } else {
-    return map_remove(hm, &key);
-  }
-}
-int map_remove_u32(struct map *hm, uint32_t key) {
-  return map_remove(hm, (void*) (uintptr_t) key);
-}
-void* map_get(struct map *hm, const void *key) {
-  uint32_t hash = hm->hash_key_fn(key);
-  struct _map_entry *entry = _map_entry_find(hm, key, hash);
-  if (entry) {
-    return entry->val;
-  } else {
-    return 0;
-  }
-}
-void* map_get_u64(struct map *hm, uint64_t key) {
-  if (hm->int_key_as_pointer_value) {
-    return map_get(hm, (void*) (intptr_t) key);
-  } else {
-    return map_get(hm, &key);
-  }
-}
-void* map_get_u32(struct map *hm, uint32_t key) {
-  return map_get(hm, (void*) (intptr_t) key);
-}
-uint32_t map_count(const struct map *hm) {
-  return hm->count;
-}
-void map_clear(struct map *hm) {
   if (!hm) {
     return;
   }
-  for (struct _map_bucket *b = hm->buckets, *be = hm->buckets + _map_n_buckets(hm); b < be; ++b) {
-    for (struct _map_entry *e = b->entries, *ee = b->entries + b->used; e < ee; ++e) {
-      hm->kv_free_fn(hm->int_key_as_pointer_value ? 0 : e->key, e->val);
-    }
-    free(b->entries);
-    b->used = 0;
-    b->total = 0;
-    b->entries = 0;
-  }
-  if (_map_n_buckets(hm) > MIN_BUCKETS) {
-    struct _map_bucket *buckets_new = realloc(hm->buckets, sizeof(buckets_new[0]) * MIN_BUCKETS);
-    if (buckets_new) {
-      memset(buckets_new, 0, sizeof(buckets_new[0]) * MIN_BUCKETS);
-      hm->buckets = buckets_new;
-      hm->buckets_mask = MIN_BUCKETS - 1;
+  for (struct _map_entry *entry = hm->entries, *end = hm->entries + hm->capacity; entry < end; ++entry) {
+    if (entry->hash) {
+      hm->kv_free_fn(entry->key, entry->val);
     }
   }
-  hm->count = 0;
+  free(hm->entries);
+  free(hm);
+}
+void map_put_str(struct map *hm, const char *key, void *val) {
+  _map_put(hm, xstrdup(key), val);
+}
+void map_put_str_no_copy(struct map *hm, const char *key, void *val) {
+  _map_put(hm, key, val);
+}
+int map_remove(struct map *hm, const char *key) {
+  struct _map_entry *entry = _map_entry_find(hm, key, _map_nhash(_map_hash_buf_key(key)));
+  if (!entry) {
+    return 0;
+  }
+  _map_entry_remove(hm, entry);
+  return 1;
+}
+void* map_get(struct map *hm, const char *key) {
+  struct _map_entry *entry = _map_entry_find(hm, key, _map_nhash(_map_hash_buf_key(key)));
+  return entry ? entry->val : 0;
 }
 void map_iter_init(struct map *hm, struct map_iter *iter) {
   iter->hm = hm;
@@ -2014,26 +2080,34 @@ void map_iter_init(struct map *hm, struct map_iter *iter) {
   iter->val = 0;
 }
 int map_iter_next(struct map_iter *iter) {
-  if (!iter->hm) {
+  struct map *hm = iter->hm;
+  if (!hm) {
     return 0;
   }
-  struct _map_entry *entry;
-  struct _map_bucket *bucket = iter->hm->buckets + iter->bucket;
-  ++iter->entry;
-  if ((uint32_t) iter->entry >= bucket->used) {
-    uint32_t n = _map_n_buckets(iter->hm);
-    iter->entry = 0;
-    for (++iter->bucket; iter->bucket < n; ++iter->bucket) {
-      bucket = iter->hm->buckets + iter->bucket;
-      if (bucket->used > 0) {
-        break;
-      }
-    }
-    if (iter->bucket >= n) {
-      return 0;
+  struct _map_entry *entries = hm->entries;
+  uint32_t capacity = hm->capacity;
+  if ((iter->entry >= 0) && ((uint32_t) iter->entry < capacity)) {
+    // Removals shift the rest of the probe cluster backwards, so the slot
+    // returned by the previous call may hold another entry now (this is the case
+    // when the caller removes the entry it has just received). Return that entry
+    // as well, otherwise it would be silently skipped by the iteration.
+    struct _map_entry *entry = entries + iter->entry;
+    if (entry->hash && ((entry->hash != iter->bucket) || (entry->key != iter->key))) {
+      iter->bucket = entry->hash;
+      iter->key = entry->key;
+      iter->val = entry->val;
+      return 1;
     }
   }
-  entry = bucket->entries + iter->entry;
+  uint32_t i = (iter->entry < 0) ? 0 : (uint32_t) iter->entry + 1;
+  for ( ; (i < capacity) && !entries[i].hash; ++i) {}
+  if (i >= capacity) {
+    iter->entry = (int32_t) capacity;
+    return 0;
+  }
+  struct _map_entry *entry = entries + i;
+  iter->entry = (int32_t) i;
+  iter->bucket = entry->hash;
   iter->key = entry->key;
   iter->val = entry->val;
   return 1;
@@ -2342,7 +2416,8 @@ static int _utils_copy_symlink(const char *src, const char *dst, const struct st
 static int _utils_copy_regular(
   const char        *src,
   const char        *dst,
-  const struct stat *src_st) {
+  const struct stat *src_st,
+  mode_t           (*mode_fn)(mode_t)) {
   struct stat dst_st;
   if (lstat(dst, &dst_st) == 0) {
     if (S_ISDIR(dst_st.st_mode)) {
@@ -2361,13 +2436,18 @@ static int _utils_copy_regular(
     return errno;
   }
   int rc = utils_copy_file(src, dst);
-  if (  !rc
-     && chmod(dst, src_st->st_mode & 07777) != 0) {
-    rc = errno;
+  if (!rc) {
+    mode_t mode = src_st->st_mode & 07777;
+    if (mode_fn) {
+      mode = mode_fn(mode);
+    }
+    if (chmod(dst, mode) != 0) {
+      rc = errno;
+    }
   }
   return rc;
 }
-static int _utils_copy_dir_recursive(const char *src, const char *dst) {
+static int _utils_copy_dir_recursive(const char *src, const char *dst, mode_t (*mode_fn)(mode_t)) {
   struct stat src_st;
   struct stat dst_st;
   if (lstat(src, &src_st) != 0) {
@@ -2422,9 +2502,9 @@ static int _utils_copy_dir_recursive(const char *src, const char *dst) {
     if (lstat(src_path, &entry_st) != 0) {
       rc = errno;
     } else if (S_ISDIR(entry_st.st_mode)) {
-      rc = _utils_copy_dir_recursive(src_path, dst_path);
+      rc = _utils_copy_dir_recursive(src_path, dst_path, mode_fn);
     } else if (S_ISREG(entry_st.st_mode)) {
-      rc = _utils_copy_regular(src_path, dst_path, &entry_st);
+      rc = _utils_copy_regular(src_path, dst_path, &entry_st, mode_fn);
     } else if (S_ISLNK(entry_st.st_mode)) {
       rc = _utils_copy_symlink(src_path, dst_path, &entry_st);
     } else {
@@ -2440,30 +2520,40 @@ static int _utils_copy_dir_recursive(const char *src, const char *dst) {
   if (closedir(dir) != 0 && !rc) {
     rc = errno;
   }
-  if (  created
-     && chmod(dst, src_st.st_mode & 07777) != 0
-     && !rc) {
-    rc = errno;
+  if (!rc && (mode_fn || created)) {
+    mode_t mode = src_st.st_mode & 07777;
+    if (mode_fn) {
+      mode = mode_fn(mode);
+    }
+    if (chmod(dst, mode) != 0) {
+      rc = errno;
+    }
   }
   return rc;
 }
-int utils_copy_dir(const char *src, const char *dst) {
+int utils_copy_dir_mode(const char *src, const char *dst, mode_t (*mode_fn)(mode_t)) {
   if (!src || !*src || !dst || !*dst) {
     return AK_ERROR_INVALID_ARGS;
   }
   int rc = _utils_check_overlap(src, dst);
-  return rc ? rc : _utils_copy_dir_recursive(src, dst);
+  return rc ? rc : _utils_copy_dir_recursive(src, dst, mode_fn);
 }
-int utils_copy_dir_to_parent(const char *src, const char *dst) {
+int utils_copy_dir(const char *src, const char *dst) {
+  return utils_copy_dir_mode(src, dst, 0);
+}
+int utils_copy_dir_to_parent_mode(const char *src, const char *dst, mode_t (*mode_fn)(mode_t)) {
   if (!src || !*src || !dst || !*dst) {
     return AK_ERROR_INVALID_ARGS;
   }
   struct pool *pool = pool_create_empty();
   char *bname = path_basename(pool_strdup(pool, src));
   dst = path_join_path_pool(pool, dst, bname, 0);
-  int rv = utils_copy_dir(src, dst);
+  int rv = utils_copy_dir_mode(src, dst, mode_fn);
   pool_destroy(pool);
   return rv;
+}
+int utils_copy_dir_to_parent(const char *src, const char *dst) {
+  return utils_copy_dir_to_parent_mode(src, dst, 0);
 }
 long int utils_strtol(const char *v, int base, int *rcp) {
   *rcp = 0;
@@ -3757,6 +3847,39 @@ int fetchreg_open(const char *path, struct fetchreg **out) {
   *out = r;
   return 0;
 }
+/// Splits a single registry line into url, target and build id parts.
+/// Modifies the given buffer. On invalid input `url` is zeroed.
+static void _fetchreg_parse_line(char *buf, struct fetcherg_entry *e) {
+  e->url = 0;
+  e->target = 0;
+  e->build_id = 0;
+  char *sep = strchr(buf, '\1');
+  if (!sep || sep == buf) {
+    return;
+  }
+  *sep = '\0';
+  char *target = sep + 1;
+  char *sep2 = strchr(target, '\1');
+  if (sep2) {
+    *sep2 = '\0';
+    char *build_id = sep2 + 1;
+    int rv = utils_endswith(build_id, "\n");
+    if (rv) {
+      build_id[rv - 1] = '\0';
+    }
+    if (*build_id) {
+      e->build_id = build_id;
+    }
+  }
+  int rv = utils_endswith(target, "\n");
+  if (rv) {
+    target[rv - 1] = '\0';
+  }
+  e->url = buf;
+  if (*target) {
+    e->target = target;
+  }
+}
 bool fetchreg_find(
   struct fetchreg *r,
   const char *url,
@@ -3765,51 +3888,56 @@ bool fetchreg_find(
   akassert(r && url);
   char buf[PATH_MAX * 3 + 2];
   char sbuf[sizeof(buf)];
-  struct fetcherg_entry se = { 0 };
+  size_t url_off = 0;
+  size_t target_off = 0;
+  size_t build_id_off = 0;
+  bool found = false;
+  struct fetcherg_entry e = { 0 };
   if (fseek(r->f, 0, SEEK_SET) == -1) {
-    akerror(errno, "fetchreg for %s", url);
+    akerror(errno, "Failed to seek fetch registry for: %s", url);
     return false;
   }
   // Find the last matched fetched entry
   while (fgets(buf, sizeof(buf), r->f)) {
-    struct fetcherg_entry e = { 0 };
-    int idxs[1] = { 0 };
-    char *rp = buf;
-    for ( ; *rp; ++rp) {
-      if (*rp == '\1') {
-        *rp = '\0';
-        if (strcmp(buf, url) != 0) {
-          break;
-        }
-        e.url = buf;
-        if (rp[1] != '\0' && rp[1] != '\n') {
-          e.target = rp + 1;
-          idxs[0] = e.target - buf;
-        }
-        break;
-      }
+    _fetchreg_parse_line(buf, &e);
+    if (!e.url || strcmp(e.url, url) != 0) {
+      continue;
     }
-    if (e.url) {
-      memset(&se, 0, sizeof(se));
-      memcpy(sbuf, buf, sizeof(buf));
-      se.url = sbuf;
-      if (idxs[0]) {
-        char *target = sbuf + idxs[0];
-        int rv = utils_endswith(target, "\n");
-        if (rv) {
-          target[rv - 1] = '\0';
-        }
-        se.target = target;
-      }
-    }
+    url_off = e.url - buf;
+    target_off = e.target ? (size_t) (e.target - buf) : 0;
+    build_id_off = e.build_id ? (size_t) (e.build_id - buf) : 0;
+    memcpy(sbuf, buf, sizeof(sbuf));
+    found = true;
   }
-  if (se.url) {
-    if (cb) {
-      cb(&se, user_data);
-    }
-    return true;
-  } else {
+  if (!found) {
     return false;
+  }
+  struct fetcherg_entry se = {
+    .url = sbuf + url_off,
+    .target = target_off ? sbuf + target_off : 0,
+    .build_id = build_id_off ? sbuf + build_id_off : 0,
+  };
+  if (cb) {
+    cb(&se, user_data);
+  }
+  return true;
+}
+void fetchreg_foreach(
+  struct fetchreg *r,
+  void *user_data,
+  void (*cb)(const struct fetcherg_entry*, void*)) {
+  akassert(r && cb);
+  char buf[PATH_MAX * 3 + 2];
+  struct fetcherg_entry e = { 0 };
+  if (fseek(r->f, 0, SEEK_SET) == -1) {
+    akerror(errno, "Failed to seek fetch registry", 0);
+    return;
+  }
+  while (fgets(buf, sizeof(buf), r->f)) {
+    _fetchreg_parse_line(buf, &e);
+    if (e.url) {
+      cb(&e, user_data);
+    }
   }
 }
 int fetchreg_register(struct fetchreg *r, const struct fetcherg_entry *entry) {
@@ -3824,7 +3952,13 @@ int fetchreg_register(struct fetchreg *r, const struct fetcherg_entry *entry) {
     return errno;
   }
   if (entry->target) {
-    if (fprintf(r->f, "%s\1%s\n", entry->url, entry->target) < 0) {
+    int rc;
+    if (entry->build_id) {
+      rc = fprintf(r->f, "%s\1%s\1%s\n", entry->url, entry->target, entry->build_id);
+    } else {
+      rc = fprintf(r->f, "%s\1%s\n", entry->url, entry->target);
+    }
+    if (rc < 0) {
       return errno;
     }
   } else {
@@ -3838,6 +3972,883 @@ int fetchreg_register(struct fetchreg *r, const struct fetcherg_entry *entry) {
 }
 void fetchreg_close(struct fetchreg *r) {
   _fetchreg_destroy(r);
+}
+#ifndef _AMALGAMATE_
+#include "toolchain.h"
+#include "script.h"
+#include "env.h"
+#include "utils.h"
+#include "xstr.h"
+#include "paths.h"
+#include "log.h"
+#include "alloc.h"
+#include <ctype.h>
+#include <errno.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#endif
+#define TOOLCHAIN_VAR_PREFIX "TOOLCHAIN_"
+/// Well known descriptor keys and the toolchain field they define.
+///
+/// Descriptor keys are not limited to this list: any other key declared by a
+/// descriptor is still published as `TOOLCHAIN_<KEY>`.
+struct _toolchain_key {
+  const char *key;   // Normalized key name
+  size_t     offset; // Offset of the target field in struct toolchain
+};
+#define TK(key__, field__) { key__, offsetof(struct toolchain, field__) }
+static const struct _toolchain_key _toolchain_keys[] = {
+  TK("id", id),
+  TK("system", system),
+  TK("os", system),
+  TK("arch", arch),
+  TK("arch_alt", arch_alt),
+  TK("archalt", arch_alt),
+  TK("bits", bits),
+  TK("bitness", bits),
+  TK("endian", endian),
+  TK("endianness", endian),
+  TK("cc", cc),
+  TK("cxx", cxx),
+  TK("ar", ar),
+  TK("ranlib", ranlib),
+  TK("strip", strip),
+  TK("pkgconf", pkgconf),
+  TK("cflags", cflags),
+  TK("ldflags", ldflags),
+  TK("host_cc", host_cc),
+  TK("host_cxx", host_cxx),
+  TK("host_ar", host_ar),
+  TK("host_cflags", host_cflags),
+  TK("host_cxxflags", host_cxxflags),
+  TK("host_ldflags", host_ldflags),
+  TK("runner", runner),
+};
+/// Normalizes a descriptor key: lowercase, `-` and `.` are treated as `_`.
+static char* _key_normalize(char *wp, size_t wp_size, const char *rp) {
+  char *ret = wp;
+  char *ep = wp + wp_size - 1;
+  for ( ; *rp && wp < ep; ++rp) {
+    char ch = (char) tolower((unsigned char) *rp);
+    if (ch == '-' || ch == '.') {
+      ch = '_';
+    }
+    *wp++ = ch;
+  }
+  *wp = '\0';
+  return ret;
+}
+const char* toolchain_var_get(struct toolchain *tc, const char *key) {
+  if (!tc || !key) {
+    return 0;
+  }
+  char normalized[256];
+  _key_normalize(normalized, sizeof(normalized), key);
+  for (int i = tc->vars.num - 1; i >= 0; --i) { // The last declaration wins
+    struct toolchain_var *v = *(struct toolchain_var**) ulist_get(&tc->vars, i);
+    if (strcmp(v->key, normalized) == 0) {
+      return v->val;
+    }
+  }
+  return 0;
+}
+static const struct _toolchain_key* _key_lookup(const char *normalized) {
+  for (size_t i = 0; i < sizeof(_toolchain_keys) / sizeof(_toolchain_keys[0]); ++i) {
+    if (strcmp(_toolchain_keys[i].key, normalized) == 0) {
+      return &_toolchain_keys[i];
+    }
+  }
+  return 0;
+}
+static const char* _endian_normalize(const char *v) {
+  if (!v) {
+    return 0;
+  }
+  char buf[32];
+  size_t len = strlen(v);
+  if (len >= sizeof(buf)) {
+    return 0;
+  }
+  for (size_t i = 0; i <= len; ++i) {
+    buf[i] = (char) tolower((unsigned char) v[i]);
+  }
+  if (!strcmp(buf, "little") || !strcmp(buf, "little-endian") || !strcmp(buf, "le") || !strcmp(buf, "lsb")) {
+    return "little";
+  }
+  if (!strcmp(buf, "big") || !strcmp(buf, "big-endian") || !strcmp(buf, "be") || !strcmp(buf, "msb")) {
+    return "big";
+  }
+  return 0;
+}
+/// Collects all values of a descriptor field into a single whitespace separated string.
+static char* _field_value(struct node *bag, struct xstr *xstr) {
+  for (struct node *nn = bag->child; nn; nn = nn->next) {
+    const char *v = node_value(nn);
+    if (!v || *v == '\0') {
+      continue;
+    }
+    if (is_vlist(v)) {
+      struct vlist_iter iter;
+      vlist_iter_init(v, &iter);
+      while (vlist_iter_next(&iter)) {
+        if (iter.len) {
+          if (xstr_size(xstr)) {
+            xstr_cat2(xstr, " ", 1);
+          }
+          xstr_cat2(xstr, iter.item, iter.len);
+        }
+      }
+    } else {
+      if (xstr_size(xstr)) {
+        xstr_cat2(xstr, " ", 1);
+      }
+      xstr_cat(xstr, v);
+    }
+  }
+  if (xstr_size(xstr)) {
+    return xstr_destroy_keep_ptr(xstr);
+  }
+  xstr_destroy(xstr);
+  return 0;
+}
+static struct node* _toolchain_rule_find(struct node *root) {
+  for (struct node *nn = root->child; nn; nn = nn->next) {
+    if (nn->type == NODE_TYPE_BAG && strcmp(nn->value, "toolchain") == 0) {
+      return nn;
+    }
+  }
+  return 0;
+}
+/// Resolves the structural parts of a descriptor fragment.
+///
+/// Only `set`/`let` and `if` rules are interpreted; any other rule is plain
+/// key/value data. This keeps arbitrary keys usable even when they collide
+/// with build rule names (`cc`, `check`, `run`, ...): descriptors are data,
+/// not build scripts.
+static void _fragment_resolve(struct node *n, int depth) {
+  struct node *nn = n->child;
+  while (nn) {
+    if (nn->type == NODE_TYPE_IF) {
+      node_init(nn);
+      // The rule is spliced into its parent, so restart the sibling scan
+      nn = n->child;
+      continue;
+    }
+    struct node *next = nn->next;
+    if (nn->type == NODE_TYPE_SET) {
+      node_init(nn);
+    } else if (nn->type == NODE_TYPE_BAG && depth < 3) {
+      _fragment_resolve(nn, depth + 1);
+    }
+    nn = next;
+  }
+}
+static char* _id_from_path(const char *path) {
+  char buf[PATH_MAX];
+  utils_strncpy(buf, path, sizeof(buf));
+  char *base = path_basename(buf);
+  char *dot = strrchr(base, '.');
+  if (dot && dot != base) {
+    *dot = '\0';
+  }
+  return xstrdup(base);
+}
+/// Registers a single descriptor key/value pair.
+static void _var_add(struct pool *pool, struct toolchain *tc, struct node *n, const char *key, const char *val) {
+  const struct _toolchain_key *k = _key_lookup(key);
+  if (k) {
+    *(const char**) ((char*) tc + k->offset) = val;
+  } else if (g_env.verbose) {
+    node_info(n, "Toolchain key: %s", key);
+  }
+  size_t vlen = strlen(TOOLCHAIN_VAR_PREFIX) + strlen(key) + 1;
+  char *var = pool_alloc(pool, vlen);
+  utils_strncpy(var, TOOLCHAIN_VAR_PREFIX, vlen);
+  char *wp = var + strlen(TOOLCHAIN_VAR_PREFIX);
+  for (const char *rp = key; *rp; ++rp) {
+    *wp++ = (char) toupper((unsigned char) *rp);
+  }
+  *wp = '\0';
+  struct toolchain_var *tv = pool_calloc(pool, sizeof(*tv));
+  *tv = (struct toolchain_var) {
+    .key = key,
+    .var = var,
+    .val = val,
+  };
+  ulist_push(&tc->vars, &tv);
+}
+struct toolchain* toolchain_load(struct pool *pool, const char *path) {
+  char abs[PATH_MAX];
+  if (!path_normalize_cwd(path, g_env.cwd, abs)) {
+    akfatal(AK_ERROR_FAIL, "Failed to resolve toolchain descriptor path: %s", path);
+  }
+  if (!path_is_file(abs)) {
+    akfatal(AK_ERROR_FAIL, "Toolchain descriptor not found: %s", abs);
+  }
+  char buf[PATH_MAX];
+  utils_strncpy(buf, abs, sizeof(buf));
+  const char *base = path_basename(buf);
+  struct pool *fpool = pool_create(on_unit_pool_destroy);
+  const char *unit_path = pool_printf(fpool, ".autark-toolchain/%s", base);
+  struct sctx *sctx = 0;
+  int rc = script_open_fragment(abs, unit_path, fpool, 0, &sctx);
+  if (rc) {
+    pool_destroy(fpool);
+    akfatal(rc, "Failed to parse toolchain descriptor: %s", abs);
+  }
+  struct node *root = sctx->root;
+  _fragment_resolve(root, 0); // Resolves `set` variables and `if` conditions
+  struct node *tn = _toolchain_rule_find(root);
+  if (!tn) {
+    script_close(&sctx);
+    pool_destroy(fpool);
+    akfatal(AK_ERROR_FAIL, "Toolchain descriptor has no `toolchain { }` rule: %s", abs);
+  }
+  struct toolchain *tc = pool_calloc(pool, sizeof(*tc));
+  ulist_init(&tc->vars, 32, sizeof(struct toolchain_var*));
+  tc->path = pool_strdup(pool, abs);
+  for (struct node *nn = tn->child; nn; nn = nn->next) {
+    if (node_is_can_be_value(nn)) {
+      node_warn(nn, "Toolchain descriptor expects `key { value }` declarations, ignored: %s", nn->value);
+      continue;
+    }
+    char key[256];
+    _key_normalize(key, sizeof(key), nn->value);
+    struct xstr *xstr = xstr_create_empty();
+    char *val = _field_value(nn, xstr);
+    _var_add(pool, tc, nn, pool_strdup(pool, key), pool_strdup(pool, val ? val : ""));
+    free(val);
+  }
+  if (!tc->id) {
+    char *id = _id_from_path(abs);
+    tc->id = pool_strdup(pool, id);
+    free(id);
+  }
+  if (!tc->arch_alt) {
+    tc->arch_alt = tc->arch;
+  }
+  if (tc->system) {
+    char *system = xstrdup(tc->system);
+    for (char *p = system; *p; ++p) {
+      *p = (char) tolower((unsigned char) *p);
+    }
+    tc->system = pool_strdup(pool, system);
+    free(system);
+  }
+  if (tc->endian) {
+    const char *endian = _endian_normalize(tc->endian);
+    if (!endian) {
+      script_close(&sctx);
+      pool_destroy(fpool);
+      akfatal(AK_ERROR_FAIL, "Toolchain descriptor: unknown endianness: %s", tc->endian);
+    }
+    tc->endian = endian;
+  }
+  if (!tc->cc) {
+    akwarn("Toolchain descriptor: %s declares no target C compiler (cc { ... })", abs);
+  }
+  script_close(&sctx);
+  pool_destroy(fpool);
+  return tc;
+}
+void toolchain_destroy(struct toolchain *tc) {
+  if (tc) {
+    ulist_destroy_keep(&tc->vars);
+  }
+}
+/// Publishes a value as a build script variable and as a process environment variable.
+static void _publish(struct unit *root, const char *key, const char *val) {
+  if (!val || *val == '\0') {
+    return;
+  }
+  unit_env_set_val(root, key, val);
+  setenv(key, val, 1);
+}
+static void _publish_upper(struct unit *root, const char *prefix, const char *val) {
+  if (!val || *val == '\0') {
+    return;
+  }
+  struct xstr *xstr = xstr_create_empty();
+  xstr_cat(xstr, prefix);
+  for (const char *p = val; *p; ++p) {
+    char ch = (char) toupper((unsigned char) *p);
+    if (ch == '-' || ch == '.') {
+      ch = '_';
+    }
+    xstr_cat2(xstr, &ch, 1);
+  }
+  _publish(root, xstr_ptr(xstr), "1");
+  xstr_destroy(xstr);
+}
+void toolchain_activate(void) {
+  if (g_env.project.toolchain || !g_env.project.toolchain_path) {
+    return;
+  }
+  struct toolchain *tc = toolchain_load(g_env.pool, g_env.project.toolchain_path);
+  toolchain_apply(tc);
+}
+const char* toolchain_id(void) {
+  return g_env.project.toolchain ? g_env.project.toolchain->id : 0;
+}
+void toolchain_apply(struct toolchain *tc) {
+  if (!tc) {
+    return;
+  }
+  g_env.project.toolchain = tc;
+  struct unit *root = unit_root();
+  // Every declared key is exposed as TOOLCHAIN_<KEY>
+  for (int i = 0; i < tc->vars.num; ++i) {
+    struct toolchain_var *v = *(struct toolchain_var**) ulist_get(&tc->vars, i);
+    _publish(root, v->var, v->val);
+  }
+  _publish(root, AUTARK_TARGET_ENV, tc->id);
+  _publish(root, AUTARK_TOOLCHAIN_ENV, tc->path);
+  _publish(root, "SYSTEM_CROSS", "1");
+  _publish(root, "SYSTEM_TARGET", tc->id);
+  _publish(root, "SYSTEM_TOOLCHAIN", tc->path);
+  _publish(root, "SYSTEM_ARCH", tc->arch);
+  _publish(root, "SYSTEM_ARCH_ALT", tc->arch_alt);
+  if (tc->system) {
+    _publish(root, "SYSTEM_NAME", tc->system);
+    _publish_upper(root, "SYSTEM_", tc->system);
+  }
+  // Declared bitness/endianness are the fallback values for check scripts.
+  // When a runner is declared the target probe is executed, so the measured
+  // facts must not be shadowed by stale declared ones.
+  bool declared_facts = (tc->runner == 0 || *tc->runner == '\0');
+  if (tc->bits) {
+    struct xstr *xstr = xstr_create_empty();
+    xstr_printf(xstr, "SYSTEM_BITNESS_%s", tc->bits);
+    _publish(root, "SYSTEM_BITNESS", tc->bits);
+    if (declared_facts) {
+      _publish(root, xstr_ptr(xstr), "1");
+    }
+    xstr_destroy(xstr);
+  }
+  if (tc->endian) {
+    _publish(root, "SYSTEM_ENDIAN", tc->endian);
+    if (declared_facts) {
+      if (strcmp(tc->endian, "big") == 0) {
+        _publish(root, "SYSTEM_BIGENDIAN", "1");
+      } else {
+        _publish(root, "SYSTEM_LITTLE_ENDIAN", "1");
+      }
+    }
+  }
+  _publish(root, "RUNNER", tc->runner);
+  _publish(root, "SYSTEM_RUNNER", tc->runner);
+  _publish(root, "CC", tc->cc);
+  _publish(root, "CXX", tc->cxx);
+  _publish(root, "AR", tc->ar);
+  _publish(root, "RANLIB", tc->ranlib);
+  _publish(root, "STRIP", tc->strip);
+  _publish(root, "PKGCONF", tc->pkgconf);
+  _publish(root, "CFLAGS_TARGET", tc->cflags);
+  _publish(root, "LDFLAGS_TARGET", tc->ldflags);
+  _publish(root, "HOST_CC", tc->host_cc);
+  _publish(root, "HOST_CXX", tc->host_cxx);
+  _publish(root, "HOST_AR", tc->host_ar);
+  _publish(root, "HOST_CFLAGS", tc->host_cflags);
+  _publish(root, "HOST_CXXFLAGS", tc->host_cxxflags);
+  _publish(root, "HOST_LDFLAGS", tc->host_ldflags);
+}
+const char* toolchain_object_tag(bool host_scope) {
+  if (host_scope) {
+    return TOOLCHAIN_TAG_HOST;
+  }
+  return toolchain_id();
+}
+static int _tag_path(const char *obj_path, char buf[PATH_MAX]) {
+  int rc = snprintf(buf, PATH_MAX, "%s.autark-tag", obj_path);
+  if (rc < 0 || rc >= PATH_MAX) {
+    return ENAMETOOLONG;
+  }
+  return 0;
+}
+int toolchain_object_tag_write(const char *obj_path, const char *tag) {
+  char path[PATH_MAX];
+  int rc = _tag_path(obj_path, path);
+  if (rc) {
+    return rc;
+  }
+  if (!tag || *tag == '\0') {
+    unlink(path);
+    return 0;
+  }
+  return utils_file_write_buf(path, tag, strlen(tag), false);
+}
+const char* toolchain_object_check(const char *obj_path, bool host_scope, char *buf, size_t buflen) {
+  char path[PATH_MAX];
+  if (_tag_path(obj_path, path)) {
+    return 0;
+  }
+  FILE *f = fopen(path, "r");
+  if (!f) {
+    return 0;
+  }
+  char *rp = fgets(buf, (int) buflen, f);
+  fclose(f);
+  if (!rp) {
+    return 0;
+  }
+  size_t len = strlen(buf);
+  while (len && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+    buf[--len] = '\0';
+  }
+  if (len == 0) {
+    return 0;
+  }
+  const char *expect = toolchain_object_tag(host_scope);
+  if (expect && strcmp(expect, buf) == 0) {
+    return 0;
+  }
+  return buf;
+}
+#ifndef _AMALGAMATE_
+#include "cxx_modules.h"
+#include "env.h"
+#include "utils.h"
+#include "xstr.h"
+#include "log.h"
+#include "paths.h"
+#include <ctype.h>
+#include <string.h>
+#endif
+/// Directory (relative to the project cache dir) holding compiled module interfaces.
+#define CXX_MODULES_DIR ".cxx-modules"
+/// Module map file name (gcc only) inside the BMI directory.
+#define CXX_MODULES_MAP "modules.map"
+/// Compiler specific module compilation style.
+enum cxx_modules_style {
+  CXX_MODULES_CLANG,
+  CXX_MODULES_GCC,
+};
+/// C++20 module interface unit file extensions.
+static const char* _cxx_modules_exts[] = {
+  ".cppm",
+  ".ixx",
+  ".mpp",
+  ".ccm",
+  ".cxxm",
+  0
+};
+/// Module unit declared by a source file of a cxx rule.
+struct cxx_modules_src {
+  const char *path;         // Absolute source path
+  const char *name;         // Module name
+  bool        is_interface; // Source is a module interface unit
+};
+/// Module interface unit registered in the project wide module registry.
+struct cxx_module {
+  const char  *name;   // Module name
+  const char  *bmi;    // Absolute path to the compiled module interface
+  const char  *tag;    // Toolchain tag of the compilation scope, zero for the native target
+  struct node *owner;  // Rule providing the module
+};
+/// Project wide module registry.
+///
+/// It is populated while scripts are set up (all setups finish before any build
+/// starts), so the module map of a build unit lists interfaces of all units.
+/// Registry entries refer to rule nodes of the current build environment,
+/// so the registry is released by `cxx_modules_dispose()` together with that
+/// environment and is recreated on demand.
+static struct {
+  struct pool *pool;
+  struct ulist list; // struct cxx_module*
+} _reg;
+struct cxx_modules {
+  struct node *n;
+  struct pool *pool;
+  struct ulist units;  // struct cxx_modules_src* in declaration order
+  enum cxx_modules_style style;
+  const char *tag;     // Toolchain tag of the compilation scope, can be zero
+  const char *dir;     // Absolute BMI directory
+  const char *map;     // Absolute path to the gcc module map file
+};
+static void _reg_init(void) {
+  if (!_reg.pool) {
+    _reg.pool = pool_create_empty();
+    ulist_init(&_reg.list, 0, sizeof(struct cxx_module*));
+  }
+}
+static inline bool _tag_eq(const char *a, const char *b) {
+  return strcmp(a ? a : "", b ? b : "") == 0;
+}
+static struct cxx_module* _reg_find(const char *tag, const char *name) {
+  _reg_init();
+  for (int i = 0; i < _reg.list.num; ++i) {
+    struct cxx_module *m = *(struct cxx_module**) ulist_get(&_reg.list, i);
+    if (_tag_eq(m->tag, tag) && strcmp(m->name, name) == 0) {
+      return m;
+    }
+  }
+  return 0;
+}
+static bool _reg_has_tag(const char *tag) {
+  _reg_init();
+  for (int i = 0; i < _reg.list.num; ++i) {
+    struct cxx_module *m = *(struct cxx_module**) ulist_get(&_reg.list, i);
+    if (_tag_eq(m->tag, tag)) {
+      return true;
+    }
+  }
+  return false;
+}
+static void _reg_add(struct node *n, const char *tag, const char *name, const char *bmi) {
+  struct cxx_module *prev = _reg_find(tag, name);
+  if (prev) {
+    node_fatal(AK_ERROR_FAIL, n, "C++ module '%s' is already provided by rule '%s': %s",
+               name, prev->owner->name, prev->bmi);
+  }
+  _reg_init();
+  struct cxx_module *m = pool_alloc(_reg.pool, sizeof(*m));
+  *m = (struct cxx_module) {
+    .name = pool_strdup(_reg.pool, name),
+    .bmi = pool_strdup(_reg.pool, bmi),
+    .tag = tag ? pool_strdup(_reg.pool, tag) : 0,
+    .owner = n,
+  };
+  ulist_push(&_reg.list, &m);
+}
+void cxx_modules_dispose(void) {
+  if (_reg.pool) {
+    ulist_destroy_keep(&_reg.list);
+    pool_destroy(_reg.pool);
+    memset(&_reg, 0, sizeof(_reg));
+  }
+}
+static bool _is_module_ext(const char *path) {
+  for (int i = 0; _cxx_modules_exts[i]; ++i) {
+    if (utils_endswith(path, _cxx_modules_exts[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+bool cxx_modules_is_module_path(const char *path) {
+  return _is_module_ext(path);
+}
+static bool _is_ident_start(char c) {
+  return isalpha((unsigned char) c) || c == '_';
+}
+static bool _is_ident(char c) {
+  return isalnum((unsigned char) c) || c == '_';
+}
+struct _mod_scan {
+  const char *p;
+  const char *end;
+};
+/// Skips whitespace and comments.
+static void _scan_skip(struct _mod_scan *s);
+static void _scan_skip_line(struct _mod_scan *s) {
+  while (s->p < s->end && *s->p != '\n') {
+    ++s->p;
+  }
+}
+static void _scan_skip_block_comment(struct _mod_scan *s) {
+  s->p += 2;
+  while (s->p + 1 < s->end && !(s->p[0] == '*' && s->p[1] == '/')) {
+    ++s->p;
+  }
+  s->p = (s->p + 1 < s->end) ? s->p + 2 : s->end;
+}
+static void _scan_skip_quoted(struct _mod_scan *s) {
+  char quote = *s->p++;
+  while (s->p < s->end && *s->p != quote) {
+    if (*s->p == '\\' && s->p + 1 < s->end) {
+      ++s->p;
+    }
+    ++s->p;
+  }
+  if (s->p < s->end) {
+    ++s->p;
+  }
+}
+static void _scan_skip(struct _mod_scan *s) {
+  for ( ;; ) {
+    while (s->p < s->end && utils_char_is_space(*s->p)) {
+      ++s->p;
+    }
+    if (s->p + 1 < s->end && s->p[0] == '/' && s->p[1] == '/') {
+      _scan_skip_line(s);
+      continue;
+    }
+    if (s->p + 1 < s->end && s->p[0] == '/' && s->p[1] == '*') {
+      _scan_skip_block_comment(s);
+      continue;
+    }
+    break;
+  }
+}
+/// Scans a module declaration of a module unit.
+///
+/// Module names are not subject to macro replacement, so a lexical scan is
+/// sufficient to extract them. Only the first module declaration is reported.
+///
+/// @param partition Set to true if the declaration names a module partition
+/// @param is_interface Set to true if the declaration exports the module
+///
+/// @return Module name allocated from the pool or zero if the source does not
+///         declare a module
+static const char* _scan_module_name(
+  struct node *n,
+  const char *path,
+  struct pool *pool,
+  bool *partition,
+  bool *is_interface) {
+  struct value v = utils_file_as_buf(path, -1);
+  if (v.error) {
+    value_destroy(&v);
+    node_fatal(AK_ERROR_IO, n, "Failed to read C++ module unit: %s", path);
+  }
+  if (!v.buf || v.len == 0) {
+    value_destroy(&v);
+    return 0;
+  }
+  const char *ret = 0;
+  bool exported = false;
+  bool line_start = true;
+  struct _mod_scan s = { .p = v.buf, .end = (char*) v.buf + v.len };
+  while (s.p < s.end) {
+    char c = *s.p;
+    if (c == '\n') {
+      line_start = true;
+      ++s.p;
+      continue;
+    }
+    if (utils_char_is_space(c)) {
+      ++s.p;
+      continue;
+    }
+    if (line_start && c == '#') { // Skip preprocessor directives
+      while (s.p < s.end && *s.p != '\n') {
+        if (*s.p == '\\' && s.p + 1 < s.end && s.p[1] == '\n') {
+          s.p += 2;
+          continue;
+        }
+        ++s.p;
+      }
+      continue;
+    }
+    line_start = false;
+    if (c == '/' && s.p + 1 < s.end && s.p[1] == '/') {
+      _scan_skip_line(&s);
+      continue;
+    }
+    if (c == '/' && s.p + 1 < s.end && s.p[1] == '*') {
+      _scan_skip_block_comment(&s);
+      continue;
+    }
+    if (c == '"' || c == '\'') {
+      _scan_skip_quoted(&s);
+      continue;
+    }
+    if (!_is_ident_start(c)) {
+      exported = false;
+      ++s.p;
+      continue;
+    }
+    const char *tok = s.p;
+    while (s.p < s.end && _is_ident(*s.p)) {
+      ++s.p;
+    }
+    size_t tok_len = s.p - tok;
+    if (tok_len == 6 && strncmp(tok, "export", 6) == 0) {
+      exported = true;
+      continue;
+    }
+    if (tok_len != 6 || strncmp(tok, "module", 6) != 0) {
+      exported = false;
+      continue;
+    }
+    _scan_skip(&s);
+    if (s.p < s.end && *s.p == ';') { // Global module fragment: `module;`
+      exported = false;
+      continue;
+    }
+    if (s.p >= s.end || !_is_ident_start(*s.p)) {
+      exported = false;
+      continue;
+    }
+    const char *name = s.p;
+    while (s.p < s.end && (_is_ident(*s.p) || *s.p == '.')) {
+      ++s.p;
+    }
+    size_t name_len = s.p - name;
+    _scan_skip(&s);
+    if (s.p < s.end && *s.p == ':') {
+      *partition = true;
+    }
+    ret = pool_strndup(pool, name, name_len);
+    *is_interface = exported;
+    break;
+  }
+  value_destroy(&v);
+  return ret;
+}
+static struct cxx_modules_src* _find_src(struct cxx_modules *m, const char *path) {
+  for (int i = 0; i < m->units.num; ++i) {
+    struct cxx_modules_src *u = *(struct cxx_modules_src**) ulist_get(&m->units, i);
+    if (strcmp(u->path, path) == 0) {
+      return u;
+    }
+  }
+  return 0;
+}
+static enum cxx_modules_style _detect_style(struct node *n, const char *compiler) {
+  const char *style = node_env_get(n, "CXX_MODULE_STYLE");
+  if (style && *style != '\0') {
+    if (strcmp(style, "clang") == 0) {
+      return CXX_MODULES_CLANG;
+    }
+    if (strcmp(style, "gcc") == 0) {
+      return CXX_MODULES_GCC;
+    }
+    node_fatal(AK_ERROR_SCRIPT, n, "Unsupported CXX_MODULE_STYLE value: %s (expected `clang` or `gcc`)", style);
+  }
+  char buf[PATH_MAX];
+  utils_strncpy(buf, compiler, sizeof(buf));
+  return strstr(path_basename(buf), "clang") ? CXX_MODULES_CLANG : CXX_MODULES_GCC;
+}
+struct cxx_modules* cxx_modules_create(struct node *n, const char *compiler, const char *tag) {
+  struct pool *pool = pool_create_empty();
+  struct cxx_modules *m = pool_alloc(pool, sizeof(*m));
+  const char *dir = pool_printf(pool, "%s/%s", g_env.project.cache_dir, CXX_MODULES_DIR);
+  if (tag && *tag != '\0') {
+    dir = pool_printf(pool, "%s/%s", dir, tag);
+  }
+  *m = (struct cxx_modules) {
+    .n = n,
+    .pool = pool,
+    .style = _detect_style(n, compiler),
+    .tag = tag ? pool_strdup(pool, tag) : 0,
+    .dir = dir,
+    .map = pool_printf(pool, "%s/%s", dir, CXX_MODULES_MAP),
+  };
+  ulist_init(&m->units, 0, sizeof(struct cxx_modules_src*));
+  return m;
+}
+void cxx_modules_destroy(struct cxx_modules *m) {
+  if (m) {
+    ulist_destroy_keep(&m->units);
+    pool_destroy(m->pool);
+  }
+}
+bool cxx_modules_add_source(struct cxx_modules *m, const char *src, bool required) {
+  if (!required && !_is_module_ext(src)) {
+    return false;
+  }
+  if (_find_src(m, src)) {
+    return false;
+  }
+  bool partition = false;
+  bool is_interface = false;
+  const char *name = _scan_module_name(m->n, src, m->pool, &partition, &is_interface);
+  if (!name) {
+    if (required) {
+      node_fatal(AK_ERROR_SCRIPT, m->n,
+                 "No C++ module declaration found in the source listed in `modules { }`: %s", src);
+    }
+    return false;
+  }
+  if (partition) {
+    node_fatal(AK_ERROR_NOT_IMPLEMENTED, m->n,
+               "Module partition units are not supported: %s (module '%s')", src, name);
+  }
+  struct cxx_modules_src *u = pool_alloc(m->pool, sizeof(*u));
+  *u = (struct cxx_modules_src) { .path = pool_strdup(m->pool, src), .name = name, .is_interface = is_interface };
+  ulist_push(&m->units, &u);
+  if (!is_interface) {
+    return false;
+  }
+  const char *ext = m->style == CXX_MODULES_CLANG ? "pcm" : "gcm";
+  const char *bmi = pool_printf(m->pool, "%s/%s.%s", m->dir, name, ext);
+  _reg_add(m->n, m->tag, name, bmi);
+  node_product_add(m->n, bmi, 0);
+  if (g_env.verbose) {
+    node_info(m->n, "C++ module interface unit: %s (module '%s')", src, name);
+  }
+  return true;
+}
+bool cxx_modules_is_interface(struct cxx_modules *m, const char *src) {
+  struct cxx_modules_src *u = _find_src(m, src);
+  return u && u->is_interface;
+}
+void cxx_modules_prepare(struct cxx_modules *m) {
+  if (!m || m->style != CXX_MODULES_GCC || !_reg_has_tag(m->tag)) {
+    return;
+  }
+  struct xstr *xstr = xstr_create_empty();
+  for (int i = 0; i < _reg.list.num; ++i) {
+    struct cxx_module *mod = *(struct cxx_module**) ulist_get(&_reg.list, i);
+    if (_tag_eq(mod->tag, m->tag)) {
+      xstr_printf(xstr, "%s %s\n", mod->name, mod->bmi);
+    }
+  }
+  if (xstr_size(xstr) > 0) {
+    struct value prev = utils_file_as_buf(m->map, -1);
+    bool same = !prev.error && prev.buf
+                && prev.len == xstr_size(xstr)
+                && memcmp(prev.buf, xstr_ptr(xstr), prev.len) == 0;
+    value_destroy(&prev);
+    if (!same) {
+      int rc = path_mkdirs(m->dir);
+      if (rc == 0) {
+        rc = utils_file_write_buf(m->map, xstr_ptr(xstr), xstr_size(xstr), false);
+      }
+      if (rc) {
+        node_fatal(rc, m->n, "Failed to write C++ module map file: %s", m->map);
+      }
+    }
+  }
+  xstr_destroy(xstr);
+}
+void cxx_modules_args_add(struct cxx_modules *m, struct spawn *s, const char *src) {
+  if (!m) {
+    return;
+  }
+  struct cxx_modules_src *u = _find_src(m, src);
+  if (m->style == CXX_MODULES_CLANG) {
+    if (u && u->is_interface) {
+      struct cxx_module *mod = _reg_find(m->tag, u->name);
+      akassert(mod);
+      spawn_arg_add(s, "-x");
+      spawn_arg_add(s, "c++-module");
+      spawn_arg_add(s, pool_printf(m->pool, "-fmodule-output=%s", mod->bmi));
+    } else if (u) { // Module implementation unit
+      spawn_arg_add(s, "-x");
+      spawn_arg_add(s, "c++");
+    }
+    if (_reg_has_tag(m->tag)) {
+      spawn_arg_add(s, pool_printf(m->pool, "-fprebuilt-module-path=%s", m->dir));
+    }
+  } else {
+    if (u) {
+      spawn_arg_add(s, "-x");
+      spawn_arg_add(s, "c++");
+    }
+    if (_reg_has_tag(m->tag)) {
+      spawn_arg_add(s, "-fmodules-ts");
+      spawn_arg_add(s, pool_printf(m->pool, "-fmodule-mapper=%s", m->map));
+    }
+  }
+}
+void cxx_modules_deps_add(struct cxx_modules *m, struct deps *deps) {
+  if (!m || !_reg_has_tag(m->tag)) {
+    return;
+  }
+  for (int i = 0; i < _reg.list.num; ++i) {
+    struct cxx_module *mod = *(struct cxx_module**) ulist_get(&_reg.list, i);
+    if (_tag_eq(mod->tag, m->tag) && path_is_file(mod->bmi)) {
+      deps_add(deps, DEPS_TYPE_FILE, 0, mod->bmi, 0);
+    }
+  }
+  if (m->style == CXX_MODULES_GCC && path_is_file(m->map)) {
+    deps_add(deps, DEPS_TYPE_FILE, 0, m->map, 0);
+  }
 }
 #ifndef _AMALGAMATE_
 #include "script.h"
@@ -4693,6 +5704,7 @@ int node_include_setup(struct node *n) {
 #include "utils.h"
 #include "log.h"
 #include "paths.h"
+#include "toolchain.h"
 #include <unistd.h>
 #include <string.h>
 #endif
@@ -4712,7 +5724,91 @@ struct _run_on_resolve_ctx {
   struct ulist consumes;         // sizeof(char*)
   struct ulist consumes_foreach; // sizeof(char*)
   bool fe_consumed;              // Foreach variable is consumed
+  bool is_host;                  // Rule builds a build tool running on the build host
 };
+static bool _run_is_host(struct node *n) {
+  return node_find_direct_child(n, NODE_TYPE_VALUE, "host") != 0;
+}
+/// Resolves a host build tool variable.
+///
+/// Host tools fall back to the native toolchain variables unless a target
+/// toolchain is active: in that case the target compiler must never be used to
+/// build host tools.
+static const char* _run_host_var(struct node *n, const char *key, const char *native_key, const char *fallback) {
+  const char *v = node_env_get(n, key);
+  if (v && *v != '\0') {
+    return v;
+  }
+  if (!toolchain_id()) {
+    v = node_env_get(n, native_key);
+    if (v && *v != '\0') {
+      return v;
+    }
+  }
+  return fallback;
+}
+/// Exposes the host toolchain to a spawned build tool and detaches it from the
+/// target build context, so nested Autark invocations are built natively.
+static void _run_host_env(struct node *n, struct spawn *s) {
+  spawn_env_set(s, "CC", _run_host_var(n, "HOST_CC", "CC", "cc"));
+  spawn_env_set(s, "CXX", _run_host_var(n, "HOST_CXX", "CXX", "c++"));
+  spawn_env_set(s, "AR", _run_host_var(n, "HOST_AR", "AR", "ar"));
+  const char *cflags = _run_host_var(n, "HOST_CFLAGS", "CFLAGS", 0);
+  if (cflags) {
+    spawn_env_set(s, "CFLAGS", cflags);
+  }
+  const char *cxxflags = _run_host_var(n, "HOST_CXXFLAGS", "CXXFLAGS", 0);
+  if (!cxxflags && toolchain_id()) {
+    // In a cross build HOST_CFLAGS are host flags declared for build tools,
+    // so they apply to C++ sources as well.
+    cxxflags = cflags;
+  }
+  if (cxxflags) {
+    spawn_env_set(s, "CXXFLAGS", cxxflags);
+  }
+  const char *ldflags = _run_host_var(n, "HOST_LDFLAGS", "LDFLAGS", 0);
+  if (ldflags) {
+    spawn_env_set(s, "LDFLAGS", ldflags);
+  }
+  spawn_env_set(s, AUTARK_TOOLCHAIN_ENV, "");
+  spawn_env_set(s, AUTARK_TARGET_ENV, "");
+}
+static void _run_check_obj_tag_one(struct node *n, bool host, const char *obj) {
+  if (!obj || *obj == '\0' || !utils_endswith(obj, ".o") || !path_is_file(obj)) {
+    return;
+  }
+  char tag[128];
+  const char *actual = toolchain_object_check(obj, host, tag, sizeof(tag));
+  if (!actual) {
+    return;
+  }
+  if (host) {
+    node_fatal(AK_ERROR_FAIL, n,
+               "Refusing to link object '%s' of toolchain '%s' into a host build tool", obj, actual);
+  } else {
+    node_fatal(AK_ERROR_FAIL, n,
+               "Refusing to link object '%s' compiled for toolchain '%s' into a target artifact. "
+               "Build tools must be compiled by host-cc/host-cxx and linked by a `run { host ... }` rule",
+               obj, actual);
+  }
+}
+/// Verifies that objects linked by a rule belong to its compilation scope.
+static void _run_check_obj_tags(struct node *n, bool host, const char *val) {
+  char buf[PATH_MAX];
+  if (!val) {
+    return;
+  }
+  if (is_vlist(val)) {
+    struct vlist_iter iter;
+    vlist_iter_init(val, &iter);
+    while (vlist_iter_next(&iter)) {
+      utils_strnncpy(buf, iter.item, iter.len, sizeof(buf));
+      _run_check_obj_tag_one(n, host, buf);
+    }
+  } else {
+    _run_check_obj_tag_one(n, host, val);
+  }
+}
 static void _run_on_resolve_shell(struct node_resolve *r, struct node *nn_) {
   struct node *n = r->n;
   struct xstr *xstr = xstr_create_empty();
@@ -4746,6 +5842,9 @@ static void _run_on_resolve_shell(struct node_resolve *r, struct node *nn_) {
   spawn_env_path_prepend(s, unit->cache_dir);
   spawn_set_stdout_handler(s, _run_stdout_handler);
   spawn_set_stderr_handler(s, _run_stderr_handler);
+  if (r->user_data && ((struct _run_on_resolve_ctx*) r->user_data)->is_host) {
+    _run_host_env(n, s);
+  }
   spawn_arg_add(s, "-c");
   spawn_arg_add(s, xstr_ptr(xstr));
   if (g_env.check.log) {
@@ -4778,15 +5877,22 @@ static void _run_on_resolve_exec(struct node_resolve *r, struct node *ncmd) {
   spawn_env_path_prepend(s, unit->cache_dir);
   spawn_set_stdout_handler(s, _run_stdout_handler);
   spawn_set_stderr_handler(s, _run_stderr_handler);
+  struct _run_on_resolve_ctx *ctx = r->user_data;
+  bool host = ctx && ctx->is_host;
+  if (host) {
+    _run_host_env(n, s);
+  }
   for (struct node *nn = ncmd->next; nn; nn = nn->next) {
     if (node_is_can_be_value(nn)) {
+      const char *val = node_value(nn);
+      _run_check_obj_tags(n, host, val);
       if (node_is_spread(nn)) {
         struct xstr *xstr = xstr_create_empty();
-        utils_split_values_add(node_value(nn), xstr);
+        utils_split_values_add(val, xstr);
         spawn_arg_add(s, xstr_ptr(xstr));
         xstr_destroy(xstr);
       } else {
-        spawn_arg_add(s, node_value(nn));
+        spawn_arg_add(s, val);
       }
     }
   }
@@ -4975,6 +6081,7 @@ static void _run_build(struct node *n) {
     .consumes = { .usize = sizeof(char*) },
     .consumes_foreach = { .usize = sizeof(char*) },
     .fe = node_find_parent_foreach(n),
+    .is_host = _run_is_host(n),
   };
   struct node_resolve r = {
     .n = n,
@@ -5057,10 +6164,6 @@ static char* _line_replace_def(struct node *n, struct deps *deps, char *line) {
     if (val) {
       struct xstr *xstr = xstr_create_empty();
       xstr_printf(xstr, "#define %s %s", key, np);
-      return xstr_destroy_keep_ptr(xstr);
-    } else {
-      struct xstr *xstr = xstr_create_empty();
-      xstr_printf(xstr, "#define %s 0\n", key);
       return xstr_destroy_keep_ptr(xstr);
     }
   } else {
@@ -5312,6 +6415,8 @@ int node_configure_setup(struct node *n) {
 #include "spawn.h"
 #include "alloc.h"
 #include "map.h"
+#include "toolchain.h"
+#include "cxx_modules.h"
 #include <string.h>
 #include <errno.h>
 #include <sys/wait.h>
@@ -5333,16 +6438,49 @@ struct _cc_ctx {
   struct node *n_cc;
   struct node *n_consumes;
   struct node *n_objects;
+  struct node *n_modules;
+  struct cxx_modules *modules;  // C++20 modules compilation state (cxx rules only)
   const char  *cc;
   const char  *objskey;
-  struct ulist consumes;    // sizeof(char*)
+  const char  *cflags_default; // Used when no explicit flags expression is given (host-cc/host-cxx)
+  const char  *tag;            // Toolchain object tag. Zero if objects are not tagged.
+  bool is_host;                // Compiles build tools running on the build host
+  struct ulist consumes;       // sizeof(char*)
   int num_failed;
 };
 static void _cc_cdb_entry_add(struct node *n, struct spawn *s, const char *src, const char *tgt);
-static void _cc_deps_MMD_item_add(const char *item, struct node *n, struct deps *deps, const char *src) {
-  deps_add_alias(deps, 's', src, item);
+/// Directory (relative to the unit cache dir) holding objects of build tools.
+#define CC_HOST_OBJS_DIR "host-tools"
+/// Computes the object file path (relative to the unit cache dir) for a given source.
+/// The result is allocated and should be freed by the caller.
+static char* _cc_obj_path(struct _cc_ctx *ctx, const char *src, struct unit *unit) {
+  char buf[PATH_MAX];
+  const char *nsrc = path_normalize_cwd(src, unit->cache_dir, buf);
+  bool incache = path_is_prefix_for(g_env.project.cache_dir, nsrc, unit->cache_dir);
+  char *obj = incache ? path_relativize_cwd(unit->cache_dir, nsrc, unit->cache_dir)
+              : path_relativize_cwd(unit->dir, nsrc, unit->dir);
+  char *p = strrchr(obj, '.');
+  akassert(p && p[1] != '\0');
+  p[1] = 'o';
+  p[2] = '\0';
+  if (ctx->is_host) {
+    size_t len = strlen(obj) + sizeof(CC_HOST_OBJS_DIR) + 2;
+    char *prefixed = xmalloc(len);
+    snprintf(prefixed, len, "%s/%s", CC_HOST_OBJS_DIR, obj);
+    free(obj);
+    obj = prefixed;
+  }
+  return obj;
 }
-static void _cc_deps_MMD_add(struct node *n, struct deps *deps, const char *src, const char *obj) {
+/// Writes the toolchain tag sidecar of a compiled object file.
+static void _cc_obj_tag_write(struct _cc_ctx *ctx, const char *obj) {
+  // A zero tag removes a stale tag of a previously built (cross) target
+  int rc = toolchain_object_tag_write(obj, ctx->tag);
+  if (rc) {
+    node_fatal(rc, ctx->n, "Failed to write toolchain tag of object file: %s", obj);
+  }
+}
+static void _cc_deps_MMD_add(struct node *n, struct deps *deps, const char *src, const char *obj, char flags) {
   char buf[MAX(2 * PATH_MAX, 8192)];
   size_t len = strlen(obj);
   utils_strncpy(buf, obj, sizeof(buf));
@@ -5352,7 +6490,9 @@ static void _cc_deps_MMD_add(struct node *n, struct deps *deps, const char *src,
   p[2] = '\0';
   FILE *f = fopen(buf, "r");
   if (!f) {
-    node_warn(n, "Failed to open compiler generated (-MMD) dependency file: %s", buf);
+    if (g_env.verbose) {
+      node_info(n, "No compiler generated (-MMD) dependency file: %s", buf);
+    }
     return;
   }
   bool nl = false;
@@ -5362,9 +6502,12 @@ static void _cc_deps_MMD_add(struct node *n, struct deps *deps, const char *src,
         continue;
       }
       p += len;
-      if (*p++ != ':') {
+      // The first target may be followed by module specific targets (gcc)
+      char *colon = strchr(p, ':');
+      if (colon == 0) {
         continue;
       }
+      p = colon + 1;
     } else {
       nl = false;
     }
@@ -5385,7 +6528,11 @@ static void _cc_deps_MMD_add(struct node *n, struct deps *deps, const char *src,
           *p = '\0';
           ++p;
         }
-        _cc_deps_MMD_item_add(sp, n, deps, src);
+        // Skip logical module references emitted by gcc (`.c++m`)
+        if (utils_endswith(sp, ".c++m")) {
+          continue;
+        }
+        deps_add_alias(deps, flags, src, sp);
       }
     }
   }
@@ -5404,7 +6551,6 @@ static void _cc_task_destroy(struct _cc_task *t) {
 }
 static void _cc_on_build_source(
   struct node     *n,
-  struct deps     *deps,
   const char      *src,
   const char      *obj,
   struct _cc_task *task) {
@@ -5412,12 +6558,13 @@ static void _cc_on_build_source(
     xstr_printf(g_env.check.log, "%s: build src=%s obj=%s\n", n->name, src, obj);
   }
   struct _cc_ctx *ctx = n->impl;
+  struct unit *unit = unit_peek();
   struct spawn *s = spawn_create(ctx->cc, ctx);
   task->s = s;
   spawn_set_nowait(s, true);
-  if (ctx->n_cflags) {
+  const char *cflags = ctx->n_cflags ? node_value(ctx->n_cflags) : ctx->cflags_default;
+  if (cflags && *cflags != '\0') {
     struct xstr *xstr = 0;
-    const char *cflags = node_value(ctx->n_cflags);
     if (!is_vlist(cflags)) {
       xstr = xstr_create_empty();
       utils_split_values_add(cflags, xstr);
@@ -5425,6 +6572,10 @@ static void _cc_on_build_source(
     }
     spawn_arg_add(s, cflags);
     xstr_destroy(xstr);
+  }
+  if (ctx->modules) {
+    char buf[PATH_MAX];
+    cxx_modules_args_add(ctx->modules, s, path_normalize_cwd(src, unit->cache_dir, buf));
   }
   if (!spawn_arg_starts_with(s, "-M")) {
     spawn_arg_add(s, "-MMD");
@@ -5444,72 +6595,29 @@ static void _cc_on_build_source(
   }
   task->pid = spawn_pid(s);
 }
-static void _cc_on_resolve(struct node_resolve *r) {
-  struct deps deps;
-  struct _cc_ctx *ctx = r->user_data;
+/// Compiles the given sources (up to `max_jobs` in parallel).
+///
+/// Failed sources are registered in `fmap` (cache relative source path -> failure).
+/// Dependencies of compiled sources are recorded by the caller.
+static void _cc_compile_sources(
+  struct _cc_ctx *ctx,
+  struct ulist   *slist,
+  int             max_jobs,
+  struct map     *fmap) {
   struct unit *unit = unit_peek();
-  struct ulist *slist = &ctx->sources;
-  struct ulist rlist = { .usize = sizeof(char*) };
   struct ulist tasks = { .usize = sizeof(struct _cc_task) };
-  struct map *fmap = map_create_str(map_k_free);
-  int max_jobs = g_env.max_parallel_jobs;
-  if (max_jobs <= 0) {
-    max_jobs = 1;
-  }
-  if (r->resolve_outdated.num) {
-    for (int i = 0; i < r->resolve_outdated.num; ++i) {
-      struct resolve_outdated *u = ulist_get(&r->resolve_outdated, i);
-      if (u->flags != 's') { // Rebuild all on any outdated non source dependency
-        slist = &ctx->sources;
-        break;
-      } else {
-        char *path = pool_strdup(r->pool, u->path);
-        ulist_push(&rlist, &path);
-        slist = &rlist;
-      }
-    }
-  }
-  int rc = deps_open(r->deps_path_tmp, 0, &deps);
-  if (rc) {
-    node_fatal(rc, ctx->n, "Failed to open dependency file: %s", r->deps_path_tmp);
-  }
-  node_add_unit_deps(ctx->n, &deps);
-  for (int i = 0; i < r->node_val_deps.num; ++i) {
-    struct node *nv = *(struct node**) ulist_get(&r->node_val_deps, i);
-    const char *val = node_value(nv);
-    if (val) {
-      deps_add(&deps, DEPS_TYPE_NODE_VALUE, 0, val, i);
-    }
-  }
-  for (int i = 0; i < ctx->consumes.num; ++i) {
-    const char *path = *(const char**) ulist_get(&ctx->consumes, i);
-    deps_add(&deps, DEPS_TYPE_FILE, 0, path, 0);
-  }
   for (int i = 0; i < slist->num || tasks.num > 0; ) {
     while (tasks.num < max_jobs && i < slist->num) {
       char buf[PATH_MAX];
       char *obj, *src = *(char**) ulist_get(slist, i);
+      obj = _cc_obj_path(ctx, src, unit);
       src = path_normalize_cwd(src, unit->cache_dir, buf);
-      bool incache = path_is_prefix_for(g_env.project.cache_dir, src, unit->cache_dir);
-      if (!incache) {
-        obj = path_relativize_cwd(unit->dir, src, unit->dir);
-        src = path_relativize_cwd(unit->cache_dir, src, unit->cache_dir);
-      } else {
-        obj = path_relativize_cwd(unit->cache_dir, src, unit->cache_dir);
-        src = xstrdup(obj);
-      }
-      char *p = strrchr(obj, '.');
-      akassert(p && p[1] != '\0');
-      p[1] = 'o';
-      p[2] = '\0';
+      src = path_relativize_cwd(unit->cache_dir, src, unit->cache_dir);
       struct _cc_task task = { .src = src, .obj = obj, .pid = -1 };
-      _cc_on_build_source(ctx->n, &deps, src, obj, &task);
+      _cc_on_build_source(ctx->n, src, obj, &task);
       if (task.pid == -1) {
         ++ctx->num_failed;
         map_put_str(fmap, src, (void*) (intptr_t) 1);
-        if (slist == &ctx->sources) {
-          deps_add(&deps, DEPS_TYPE_FILE_OUTDATED, 's', src, 0);
-        }
         _cc_task_destroy(&task);
       } else {
         ulist_push(&tasks, &task);
@@ -5532,12 +6640,8 @@ static void _cc_on_resolve(struct node_resolve *r) {
         if (code != 0) {
           ++ctx->num_failed;
           map_put_str(fmap, t->src, (void*) (intptr_t) 1);
-        }
-        if (slist == &ctx->sources) {
-          deps_add(&deps, code != 0 ? DEPS_TYPE_FILE_OUTDATED : DEPS_TYPE_FILE, 's', t->src, 0);
-          if (code == 0) {
-            _cc_deps_MMD_add(ctx->n, &deps, t->src, t->obj);
-          }
+        } else {
+          _cc_obj_tag_write(ctx, t->obj);
         }
         _cc_task_destroy(t);
         ulist_remove(&tasks, j);
@@ -5545,35 +6649,100 @@ static void _cc_on_resolve(struct node_resolve *r) {
       }
     }
   }
-  if (slist != &ctx->sources) {
-    for (int i = 0; i < ctx->sources.num; ++i) {
-      char buf[PATH_MAX];
-      char *obj, *src = *(char**) ulist_get(&ctx->sources, i);
-      src = path_normalize_cwd(src, unit->cache_dir, buf);
-      bool incache = path_is_prefix_for(g_env.project.cache_dir, src, unit->cache_dir);
-      if (!incache) {
-        obj = path_relativize_cwd(unit->dir, src, unit->dir);
-        src = path_relativize_cwd(unit->cache_dir, src, unit->cache_dir);
-      } else {
-        obj = path_relativize_cwd(unit->cache_dir, src, unit->cache_dir);
-        src = xstrdup(obj);
-      }
-      char *p = strrchr(obj, '.');
-      akassert(p && p[1] != '\0');
-      p[1] = 'o';
-      p[2] = '\0';
-      bool failed = map_get(fmap, src) != 0;
-      deps_add(&deps, failed ? DEPS_TYPE_FILE_OUTDATED : DEPS_TYPE_FILE, 's', src, 0);
-      if (!failed) {
-        _cc_deps_MMD_add(ctx->n, &deps, src, obj);
-      }
-      free(obj);
-      free(src);
+  ulist_destroy_keep(&tasks);
+}
+/// Splits outdated sources into module interface units and regular sources.
+static void _cc_sources_split(
+  struct _cc_ctx *ctx,
+  struct node_resolve *r,
+  struct ulist *ifaces,
+  struct ulist *sources) {
+  struct map *outdated = 0;
+  bool all = r->resolve_outdated.num == 0;
+  for (int i = 0; !all && i < r->resolve_outdated.num; ++i) {
+    struct resolve_outdated *u = ulist_get(&r->resolve_outdated, i);
+    if (u->flags != 's') { // Rebuild all on any outdated non source dependency
+      all = true;
     }
   }
+  if (!all) {
+    outdated = map_create_str(map_k_free);
+    for (int i = 0; i < r->resolve_outdated.num; ++i) {
+      struct resolve_outdated *u = ulist_get(&r->resolve_outdated, i);
+      map_put_str(outdated, u->path, (void*) (intptr_t) 1);
+    }
+  }
+  for (int i = 0; i < ctx->sources.num; ++i) {
+    const char *src = *(char**) ulist_get(&ctx->sources, i);
+    if (!all && !map_get(outdated, src)) {
+      continue;
+    }
+    if (ctx->modules && cxx_modules_is_interface(ctx->modules, src)) {
+      ulist_push(ifaces, &src);
+    } else {
+      ulist_push(sources, &src);
+    }
+  }
+  map_destroy(outdated);
+}
+static void _cc_on_resolve(struct node_resolve *r) {
+  struct deps deps;
+  struct _cc_ctx *ctx = r->user_data;
+  struct unit *unit = unit_peek();
+  struct ulist ifaces = { .usize = sizeof(char*) };
+  struct ulist slist = { .usize = sizeof(char*) };
+  struct map *fmap = map_create_str(map_k_free);
+  int max_jobs = g_env.max_parallel_jobs;
+  if (max_jobs <= 0) {
+    max_jobs = 1;
+  }
+  _cc_sources_split(ctx, r, &ifaces, &slist);
+  int rc = deps_open(r->deps_path_tmp, 0, &deps);
+  if (rc) {
+    node_fatal(rc, ctx->n, "Failed to open dependency file: %s", r->deps_path_tmp);
+  }
+  node_add_unit_deps(ctx->n, &deps);
+  for (int i = 0; i < r->node_val_deps.num; ++i) {
+    struct node *nv = *(struct node**) ulist_get(&r->node_val_deps, i);
+    const char *val = node_value(nv);
+    if (val) {
+      deps_add(&deps, DEPS_TYPE_NODE_VALUE, 0, val, i);
+    }
+  }
+  for (int i = 0; i < ctx->consumes.num; ++i) {
+    const char *path = *(const char**) ulist_get(&ctx->consumes, i);
+    deps_add(&deps, DEPS_TYPE_FILE, 0, path, 0);
+  }
+  // Module interface units must be compiled before all importers.
+  // They are compiled in their declaration order.
+  _cc_compile_sources(ctx, &ifaces, 1, fmap);
+  if (ctx->num_failed) {
+    if (g_env.verbose && slist.num) {
+      node_info(ctx->n, "Skipping %u source(s) due to C++ module compilation errors", slist.num);
+    }
+  } else {
+    _cc_compile_sources(ctx, &slist, max_jobs, fmap);
+  }
+  for (int i = 0; i < ctx->sources.num; ++i) {
+    char buf[PATH_MAX];
+    char *obj, *abs = *(char**) ulist_get(&ctx->sources, i);
+    bool iface = ctx->modules && cxx_modules_is_interface(ctx->modules, abs);
+    char flags = iface ? 0 : 's'; // Interface units rebuild the whole group
+    obj = _cc_obj_path(ctx, abs, unit);
+    char *src = path_normalize_cwd(abs, unit->cache_dir, buf);
+    src = path_relativize_cwd(unit->cache_dir, src, unit->cache_dir);
+    bool failed = map_get(fmap, src) != 0;
+    deps_add(&deps, failed ? DEPS_TYPE_FILE_OUTDATED : DEPS_TYPE_FILE, flags, src, 0);
+    if (!failed) {
+      _cc_deps_MMD_add(ctx->n, &deps, src, obj, flags);
+    }
+    free(obj);
+    free(src);
+  }
+  cxx_modules_deps_add(ctx->modules, &deps);
   deps_close(&deps);
-  ulist_destroy_keep(&rlist);
-  ulist_destroy_keep(&tasks);
+  ulist_destroy_keep(&ifaces);
+  ulist_destroy_keep(&slist);
   map_destroy(fmap);
 }
 static void _cc_on_consumed_resolved(const char *path_, void *d) {
@@ -5699,6 +6868,7 @@ static void _cc_build(struct node *n) {
       }
     }
   }
+  cxx_modules_prepare(ctx->modules);
   struct node_resolve r = {
     .n = n,
     .path = n->vfile,
@@ -5738,19 +6908,73 @@ static void _cc_source_add(struct node *n, const char *src) {
   }
   p = pool_strdup(ctx->pool, npath);
   ulist_push(&ctx->sources, &p);
-  bool incache = path_is_prefix_for(g_env.project.cache_dir, p, unit->dir);
-  const char *dir = incache ? unit->cache_dir : unit->dir;
-  char *obj = path_relativize_cwd(dir, p, dir);
-  p = strrchr(obj, '.');
-  akassert(p && p[1] != '\0');
-  p[1] = 'o';
-  p[2] = '\0';
+  char *obj = _cc_obj_path(ctx, npath, unit);
   ulist_push(&ctx->objects, &obj);
   node_product_add(n, obj, 0);
+}
+/// Initializes C++20 modules compilation of the rule.
+///
+/// Sources listed in the optional `modules { }` bag are treated as module units
+/// unconditionally, other sources are detected by their file extension.
+static void _cc_modules_setup(struct _cc_ctx *ctx, bool is_cxx) {
+  struct node *n = ctx->n;
+  struct unit *unit = unit_peek();
+  if (ctx->n_modules && !is_cxx) {
+    node_fatal(AK_ERROR_SCRIPT, n, "`modules { }` is supported only by cxx rules");
+  }
+  if (!is_cxx) {
+    for (int i = 0; i < ctx->sources.num; ++i) {
+      const char *src = *(char**) ulist_get(&ctx->sources, i);
+      if (cxx_modules_is_module_path(src)) {
+        node_fatal(AK_ERROR_SCRIPT, n, "C++ module units require a cxx rule: %s", src);
+      }
+    }
+    return;
+  }
+  ctx->modules = cxx_modules_create(n, ctx->cc, ctx->tag);
+  struct map *explicit = ctx->n_modules ? map_create_str(map_k_free) : 0;
+  if (explicit) {
+    for (struct node *nn = ctx->n_modules->child; nn; nn = nn->next) {
+      const char *val = node_value(nn);
+      if (!val || *val == '\0') {
+        continue;
+      }
+      struct vlist_iter iter;
+      vlist_iter_init(val, &iter);
+      while (vlist_iter_next(&iter)) {
+        char buf[PATH_MAX], path[PATH_MAX];
+        utils_strnncpy(buf, iter.item, iter.len, sizeof(buf));
+        const char *abs = path_is_absolute(buf)
+                          ? utils_strncpy(path, buf, sizeof(path))
+                          : path_normalize_cwd(buf, unit->dir, path);
+        map_put_str(explicit, abs, (void*) (intptr_t) 1);
+      }
+    }
+  }
+  for (int i = 0; i < ctx->sources.num; ++i) {
+    const char *src = *(char**) ulist_get(&ctx->sources, i);
+    bool required = explicit && map_get(explicit, src) != 0;
+    cxx_modules_add_source(ctx->modules, src, required);
+    if (required) {
+      map_remove(explicit, src);
+    }
+  }
+  if (explicit) {
+    struct map_iter it;
+    map_iter_init(explicit, &it);
+    if (map_iter_next(&it)) {
+      node_fatal(AK_ERROR_SCRIPT, n,
+                 "Source listed in `modules { }` is not a part of the cxx sources: %s", (const char*) it.key);
+    }
+    map_destroy(explicit);
+  }
 }
 static void _cc_setup(struct node *n) {
   _cc_cdb_init(n);
   struct _cc_ctx *ctx = n->impl;
+  bool is_cxx = strcmp(n->value, "cxx") == 0 || strcmp(n->value, "host-cxx") == 0;
+  ctx->is_host = utils_startswith(n->value, "host-");
+  ctx->tag = toolchain_object_tag(ctx->is_host);
   const char *val = node_value(ctx->n_sources);
   if (is_vlist(val)) {
     struct vlist_iter iter;
@@ -5770,33 +6994,50 @@ static void _cc_setup(struct node *n) {
     }
   }
   if (!ctx->cc) {
-    const char *key = strcmp(n->value, "cc") == 0 ? "CC" : "CXX";
-    if (key) {
-      ctx->cc = pool_strdup(ctx->pool, node_env_get(n, key));
-      if (g_env.verbose && ctx->cc) {
-        node_info(n, "Found '%s' compiler in ${%s}", ctx->cc, key);
-      }
+    const char *key = ctx->is_host
+                      ? (is_cxx ? "HOST_CXX" : "HOST_CC")
+                      : (is_cxx ? "CXX" : "CC");
+    ctx->cc = pool_strdup(ctx->pool, node_env_get(n, key));
+    if ((!ctx->cc || *ctx->cc == '\0') && ctx->is_host && !toolchain_id()) {
+      // Native builds compile build tools with the native compiler
+      ctx->cc = pool_strdup(ctx->pool, node_env_get(n, is_cxx ? "CXX" : "CC"));
+    }
+    if (g_env.verbose && ctx->cc) {
+      node_info(n, "Found '%s' compiler in ${%s}", ctx->cc, key);
     }
   }
   if (!ctx->cc) {
-    if (strcmp(n->value, "cc") == 0) {
-      ctx->cc = "cc";
-    } else {
-      ctx->cc = "c++";
-    }
+    ctx->cc = is_cxx ? "c++" : "cc";
     node_warn(n, "Fallback compiler: %s", ctx->cc);
   } else if (g_env.verbose) {
     node_info(n, "Compiler: %s", ctx->cc);
+  }
+  if (ctx->is_host && !ctx->n_cflags) {
+    // Build tools are compiled with host compiler flags unless the rule
+    // provides its own flags expression. Native builds fall back to the
+    // detected compiler flags of the corresponding language.
+    if (is_cxx) {
+      ctx->cflags_default = node_env_get(n, "HOST_CXXFLAGS");
+      if ((!ctx->cflags_default || *ctx->cflags_default == '\0')) {
+        ctx->cflags_default = toolchain_id() ? node_env_get(n, "HOST_CFLAGS")
+                                            : node_env_get(n, "CXXFLAGS");
+      }
+    } else {
+      ctx->cflags_default = node_env_get(n, "HOST_CFLAGS");
+      if ((!ctx->cflags_default || *ctx->cflags_default == '\0') && !toolchain_id()) {
+        ctx->cflags_default = node_env_get(n, "CFLAGS");
+      }
+    }
   }
   const char *objskey = 0;
   if (ctx->n_objects && ctx->n_objects->child) {
     objskey = node_value(ctx->n_objects->child);
   }
   if (!objskey) {
-    if (strcmp(n->value, "cc") == 0) {
-      objskey = "CC_OBJS";
+    if (ctx->is_host) {
+      objskey = is_cxx ? "HOST_CXX_OBJS" : "HOST_CC_OBJS";
     } else {
-      objskey = "CXX_OBJS";
+      objskey = is_cxx ? "CXX_OBJS" : "CC_OBJS";
     }
   }
   if (g_env.verbose) {
@@ -5806,6 +7047,7 @@ static void _cc_setup(struct node *n) {
   char *objs = ulist_to_vlist(&ctx->objects);
   node_env_set(n, ctx->objskey, objs);
   free(objs);
+  _cc_modules_setup(ctx, is_cxx);
 }
 static void _cc_init(struct node *n) {
   struct _cc_ctx *ctx = n->impl;
@@ -5815,6 +7057,9 @@ static void _cc_init(struct node *n) {
       continue;
     } else if (strcmp(nn->value, "objects") == 0) {
       ctx->n_objects = nn;
+      continue;
+    } else if (strcmp(nn->value, "modules") == 0) {
+      ctx->n_modules = nn;
       continue;
     }
     if (!ctx->n_sources) {
@@ -5840,6 +7085,7 @@ static void _cc_dispose(struct node *n) {
       char *p = *(char**) ulist_get(&ctx->objects, i);
       free(p);
     }
+    cxx_modules_destroy(ctx->modules);
     ulist_destroy_keep(&ctx->sources);
     ulist_destroy_keep(&ctx->objects);
     ulist_destroy_keep(&ctx->consumes);
@@ -6208,7 +7454,23 @@ struct _install_on_resolve_ctx {
   struct node *n_target;
   struct ulist consumes;  // sizeof(char*)
   bool install_overlays;
+  bool exact;  // Preserve source permissions as is
 };
+/// Normalizes permissions of an installed file.
+///
+/// By default installed files must be readable by everyone and executables
+/// must be executable by everyone. Write and special bits are preserved.
+static mode_t _install_mode_default(mode_t mode) {
+  mode &= 07777;
+  mode |= S_IRUSR | S_IRGRP | S_IROTH;
+  if (mode & (S_IXUSR | S_IXGRP | S_IXOTH)) {
+    mode |= S_IXUSR | S_IXGRP | S_IXOTH;
+  }
+  return mode;
+}
+static mode_t _install_mode_exact(mode_t mode) {
+  return mode & 07777;
+}
 static void _install_symlink(struct node *n, const char *src, const char *dst, struct stat *st) {
   char buf[PATH_MAX];
   node_info(n, "Symlink %s => %s", src, dst);
@@ -6234,13 +7496,13 @@ static void _install_symlink(struct node *n, const char *src, const char *dst, s
 #endif
   utimensat(AT_FDCWD, dst, times, AT_SYMLINK_NOFOLLOW);
 }
-static void _install_file(struct node *n, const char *src, const char *dst, struct stat *st) {
+static void _install_file(struct node *n, const char *src, const char *dst, struct stat *st, mode_t mode) {
   node_info(n, "File %s => %s", src, dst);
   int in_fd = open(src, O_RDONLY);
   if (in_fd == -1) {
     node_fatal(errno, n, "Error opening file: %s", src);
   }
-  int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, st->st_mode);
+  int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, mode);
   if (out_fd == -1) {
     node_fatal(errno, n, "Error opening file: %s", dst);
   }
@@ -6268,7 +7530,7 @@ static void _install_file(struct node *n, const char *src, const char *dst, stru
       }
     }
   }
-  fchmod(out_fd, st->st_mode);
+  fchmod(out_fd, mode);
 #ifdef __APPLE__
   struct timespec times[2] = { st->st_atime, st->st_mtime };
 #else
@@ -6283,13 +7545,17 @@ static void _install_do(struct _install_on_resolve_ctx *ctx, char *src, const ch
   char dst_buf[PATH_MAX];
   struct stat st;
   struct node *n = ctx->n;
+  mode_t (*mode_fn)(mode_t) = ctx->exact ? _install_mode_exact : _install_mode_default;
+  if (lstat(src, &st) || (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode) && !S_ISDIR(st.st_mode))) {
+    node_fatal(AK_ERROR_FAIL, n, "Cannot install unsupported or non accessible file. File: %s", src);
+  }
   if (ctx->install_overlays) {
     if (utils_endswith(src, "/" AUTARK_FETCH_DEP)) {
       // autark-cache/.overlay/myproj/.autark-fetch-dep = autark-cache/.overlay/myproj
       src = path_dirname(src);
       snprintf(dst_buf, sizeof(dst_buf), "%s/" AUTARK_CACHE "/" AUTARK_CACHE_OVERLAY_DIR, target);
       path_mkdirs(dst_buf);
-      int rci = utils_copy_dir_to_parent(src, dst_buf);
+      int rci = utils_copy_dir_to_parent_mode(src, dst_buf, mode_fn);
       if (rci) {
         node_fatal(rci, n, "Failed copy %s directory into %s", src, target);
       }
@@ -6300,22 +7566,19 @@ static void _install_do(struct _install_on_resolve_ctx *ctx, char *src, const ch
                "%s/" AUTARK_CACHE "/" AUTARK_CACHE_OVERLAY_DIR "/" AUTARK_FETCHED_REG_DIST,
                target);
       path_mkdirs_for(dst_buf);
-      _install_file(n, src, dst_buf, &st);
+      _install_file(n, src, dst_buf, &st, mode_fn(st.st_mode));
       return;
     }
-  }
-  if (lstat(src, &st) || (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode) && !S_ISDIR(st.st_mode))) {
-    node_fatal(AK_ERROR_FAIL, n, "Cannot install unsupported or non accessible file. File: %s", src);
   }
   utils_strncpy(src_buf, src, sizeof(src_buf));
   snprintf(dst_buf, sizeof(dst_buf), "%s/%s", target, path_basename(src_buf));
   if (S_ISREG(st.st_mode)) {
     path_mkdirs_for(dst_buf);
-    _install_file(n, src, dst_buf, &st);
+    _install_file(n, src, dst_buf, &st, mode_fn(st.st_mode));
   } else if (S_ISLNK(st.st_mode)) {
     _install_symlink(n, src, dst_buf, &st);
   } else if (S_ISDIR(st.st_mode)) {
-    int rci = utils_copy_dir_to_parent(src, target);
+    int rci = utils_copy_dir_to_parent_mode(src, target, mode_fn);
     if (rci) {
       node_fatal(rci, n, "Failed copy %s directory into %s", src, target);
     }
@@ -6419,12 +7682,19 @@ static void _install_on_resolve_init(struct node_resolve *r) {
   }
 }
 static void _install_post_build(struct node *n) {
+  struct node *n_target = n->child;
+  bool exact = n_target && node_is_value(n_target) && n_target->value
+               && strcmp(n_target->value, "exact") == 0;
+  if (exact) {
+    n_target = n_target->next;
+  }
   struct _install_on_resolve_ctx ctx = {
     .n = n,
-    .n_target = n->child,
+    .n_target = n_target,
     .consumes = { .usize = sizeof(char*) },
     .install_overlays = (  n->type == NODE_TYPE_INSTALL_SOURCES && g_env.project.cache_overlay_dir != 0
-                        && !(g_env.install.flags & INSTALL_FLG_SRC_OVERLAYS_APPLIED))
+                        && !(g_env.install.flags & INSTALL_FLG_SRC_OVERLAYS_APPLIED)),
+    .exact = exact
   };
   if (!ctx.n_target || !node_is_can_be_value(ctx.n_target)) {
     node_fatal(AK_ERROR_SCRIPT_SYNTAX, n, "No target dir specified");
@@ -6870,6 +8140,8 @@ int node_fetch_url_setup(struct node *n) {
 #include "alloc.h"
 #include "deps.h"
 #include "fetchreg.h"
+#include "toolchain.h"
+#include "cxx_modules.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -7130,6 +8402,9 @@ static int _usage_va(
           "    -S, --install-source-deps   Builds autonomous source distribution package dir with all external project dependencies packed.\n"
           "                                Sets -c option implicitly.\n");
   fprintf(stderr,
+          "        --toolchain=<>          Cross compilation toolchain descriptor file.\n"
+          "                                Can also be provided by the " AUTARK_TOOLCHAIN_ENV " env variable.\n");
+  fprintf(stderr,
           "        --bindir=<>             Path to 'bin' dir relative to a `prefix` dir. Default: bin\n");
   fprintf(stderr,
           "        --libdir=<>             Path to 'lib' dir relative to a `prefix` dir. Default: lib\n");
@@ -7165,6 +8440,12 @@ static int _usage_va(
           "\nautark fetched <url> <target_dir>\n"
           "  Registers external resource located at <url> is downloaded to <target_dir>.\n"
           "  See .autark/fetch_resource.sh script.\n");
+  fprintf(stderr,
+          "\nautark fetch-plan <url> <target_dir>\n"
+          "  Prints the directory an external resource should be fetched into.\n"
+          "  Exit codes: %d - already fetched, %d - fetch is required, %d - dir is rejected.\n"
+          "  See .autark/fetch_resource.sh script.\n",
+          AK_ERROR_OK, AUTARK_FETCH_PENDING_RC, AUTARK_FETCH_REJECTED_RC);
   fprintf(stderr, "\n");
   return AK_ERROR_INVALID_ARGS;
 }
@@ -7237,6 +8518,20 @@ void autark_build_prepare(const char *script_path) {
       }
     }
   }
+  // The externals store is inherited by nested builds, so all external projects
+  // fetched anywhere in the build tree are shared.
+  const char *externs_dir = getenv(AUTARK_EXTERNS_DIR_ENV);
+  if (!externs_dir || *externs_dir == '\0') {
+    externs_dir = g_env.project.cache_dir;
+  }
+  g_env.project.externs_dir = path_normalize_pool(pool_strdup(g_env.pool, externs_dir), g_env.pool);
+  setenv(AUTARK_EXTERNS_DIR_ENV, g_env.project.externs_dir, 1);
+  const char *build_id = getenv(AUTARK_BUILD_ID_ENV);
+  if (!build_id || *build_id == '\0') {
+    build_id = pool_printf(g_env.pool, "%lld-%d", (long long) utils_current_time_ms(), (int) getpid());
+  }
+  g_env.project.build_id = pool_strdup(g_env.pool, build_id);
+  setenv(AUTARK_BUILD_ID_ENV, g_env.project.build_id, 1);
   utils_strncpy(path_buf, script_path, sizeof(path_buf));
   const char *path = path_basename(path_buf);
   struct unit *unit = unit_create(path, UNIT_FLG_SRC_CWD | UNIT_FLG_ROOT, g_env.pool);
@@ -7270,6 +8565,10 @@ static void _project_command_env_read(void) {
   if (val) {
     g_env.project.cache_overlay_dir = pool_strdup(g_env.pool, val);
   }
+  val = getenv(AUTARK_EXTERNS_DIR_ENV);
+  g_env.project.externs_dir = (val && *val) ? pool_strdup(g_env.pool, val) : g_env.project.cache_dir;
+  val = getenv(AUTARK_BUILD_ID_ENV);
+  g_env.project.build_id = pool_strdup(g_env.pool, val ? val : "");
   val = getenv(AUTARK_UNIT_ENV);
   if (!val) {
     akfatal(AK_ERROR_FAIL, "Missing required AUTARK_UNIT env variable", 0);
@@ -7332,6 +8631,202 @@ static void _on_command_dep(int argc, const char **argv) {
   const char *file = argv[optind];
   _on_command_dep_impl(file);
 }
+// External resources store
+//
+// A fetched external project is identified by its URL. The build wide registry
+// `<externs_dir>/.autark-externs` maps an URL to the directory it was fetched
+// into, so the same resource is fetched (and later built) only once even if
+// several parts of the build request it. `<externs_dir>` is inherited by nested
+// builds (AUTARK_EXTERNS_DIR), so it is shared by the whole build tree.
+struct _fetch_reg_scan {
+  const char *url;      // URL to look up. Can be zero.
+  const char *dir;      // Directory to check ownership for. Can be zero.
+  const char *build_id; // Id of the current build. Can be zero.
+  char found_dir[PATH_MAX];
+  char owner_url[PATH_MAX];
+  char owner_build_id[64];
+  bool found;
+};
+static void _fetch_reg_scan_cb(const struct fetcherg_entry *e, void *d) {
+  struct _fetch_reg_scan *s = d;
+  if (!e->url) {
+    return;
+  }
+  if (s->url && strcmp(e->url, s->url) == 0) { // Last entry wins
+    if (e->target) {
+      utils_strncpy(s->found_dir, e->target, sizeof(s->found_dir));
+      s->found = true;
+    } else {
+      s->found_dir[0] = '\0';
+      s->found = false;
+    }
+    return;
+  }
+  if (  s->dir && e->target && strcmp(e->target, s->dir) == 0
+     && (!s->url || strcmp(e->url, s->url) != 0)) {
+    utils_strncpy(s->owner_url, e->url, sizeof(s->owner_url));
+    utils_strncpy(s->owner_build_id, e->build_id ? e->build_id : "", sizeof(s->owner_build_id));
+  }
+}
+static void _fetch_reg_scan(struct fetchreg *reg, struct _fetch_reg_scan *s) {
+  fetchreg_foreach(reg, s, _fetch_reg_scan_cb);
+}
+/// Checks that the dir is claimed by another resource requested by this build.
+/// Claims made by previous builds are stale and can be taken over.
+static bool _fetch_reg_is_live_claim(const struct _fetch_reg_scan *s) {
+  return s->owner_url[0] && s->build_id && *s->build_id
+         && strcmp(s->owner_build_id, s->build_id) == 0;
+}
+/// Resolves the dir an external resource belongs to.
+///
+/// The dir owned by a previous build of `url` is preferred. `owner` is filled
+/// with the claims made for the resolved dir by other resources.
+static const char* _fetch_reg_resolve(
+  struct pool            *pool,
+  struct fetchreg        *reg,
+  const char             *url,
+  const char             *store_dir,
+  struct _fetch_reg_scan *owner) {
+  struct _fetch_reg_scan scan = { .url = url, .build_id = g_env.project.build_id };
+  _fetch_reg_scan(reg, &scan);
+  // Keep a single owner of a resource even if its dir was removed
+  const char *dir = scan.found ? pool_strdup(pool, scan.found_dir) : store_dir;
+  memset(owner, 0, sizeof(*owner));
+  owner->url = url;
+  owner->dir = dir;
+  owner->build_id = g_env.project.build_id;
+  _fetch_reg_scan(reg, owner);
+  return dir;
+}
+static const char* _fetch_reg_path(struct pool *pool) {
+  return path_join_path_pool(pool, g_env.project.externs_dir, AUTARK_EXTERNS_REG, 0);
+}
+static struct fetchreg* _fetch_reg_open(struct pool *pool) {
+  const char *path = _fetch_reg_path(pool);
+  int rc = path_mkdirs_for(path);
+  if (rc) {
+    akfatal(rc, "Failed to create externals store dir for: %s", path);
+  }
+  struct fetchreg *reg = 0;
+  rc = fetchreg_open(path, &reg);
+  if (rc) {
+    akfatal(rc, "Failed to open externals registry: %s", path);
+  }
+  return reg;
+}
+/// Returns the URL stored in the fetch marker of a given dir. Allocated value.
+static char* _fetch_marker_url(const char *marker) {
+  struct value v = utils_file_as_buf(marker, PATH_MAX);
+  if (v.error || !v.buf) {
+    value_destroy(&v);
+    return 0;
+  }
+  char *ret = v.buf;
+  size_t len = strlen(ret);
+  while (len > 0 && (ret[len - 1] == '\n' || ret[len - 1] == '\r' || ret[len - 1] == ' ')) {
+    ret[--len] = '\0';
+  }
+  if (len == 0) {
+    free(ret);
+    return 0;
+  }
+  return ret;
+}
+/// Checks what `dir` contains the resource fetched from `url`.
+static bool _fetch_dir_valid(struct pool *pool, const char *dir, const char *url) {
+  if (!path_is_dir(dir)) {
+    return false;
+  }
+  const char *marker = path_join_path_pool(pool, dir, AUTARK_FETCH_DEP, 0);
+  if (!path_is_file(marker)) {
+    return false;
+  }
+  char *marker_url = _fetch_marker_url(marker);
+  bool ret = !marker_url || strcmp(marker_url, url) == 0;
+  free(marker_url);
+  return ret;
+}
+/// Maps a requested fetch dir into the build wide externals store.
+static const char* _fetch_store_dir(struct pool *pool, const char *requested) {
+  const char *root = g_env.project.externs_dir;
+  if (!root) {
+    return requested;
+  }
+  // A dir requested relative to the project cache keeps its place in the store,
+  // so the same request of a nested build lands in the same store dir.
+  const char *rel = path_is_prefix_for(g_env.project.cache_dir, requested, 0);
+  if (rel && *rel) {
+    return path_join_path_pool(pool, root, rel, 0);
+  }
+  return requested;
+}
+/// Computes the dir path relative to the project source distribution overlay.
+static const char* _fetch_overlay_rel(struct pool *pool, const char *dir) {
+  if (!g_env.project.externs_dir) {
+    return 0;
+  }
+  const char *rel = path_is_prefix_for(g_env.project.externs_dir, dir, 0);
+  if (!rel || *rel == '\0') {
+    rel = path_is_prefix_for(g_env.project.cache_dir, dir, 0);
+  }
+  return rel && *rel ? pool_strdup(pool, rel) : 0;
+}
+static void _fetch_overlay_register(struct pool *pool, const char *url, const char *rel) {
+  struct fetchreg *reg;
+  const char *path = path_join_path_pool(pool, g_env.project.cache_overlay_dir, AUTARK_FETCHED_REG, 0);
+  int rc = fetchreg_open(path, &reg);
+  if (rc) {
+    akfatal(rc, "autark fetched Failed to open fetch registry file: %s", path);
+  }
+  struct _fetch_reg_scan scan = { .url = url };
+  _fetch_reg_scan(reg, &scan);
+  if (!scan.found || strcmp(scan.found_dir, rel) != 0) {
+    akcheck(fetchreg_register(reg, &(struct fetcherg_entry) {
+      .url = url,
+      .target = rel,
+    }));
+  }
+  fetchreg_close(reg);
+}
+/// Resolves the directory an external resource should be fetched into.
+///
+/// Prints the directory to stdout and exits with:
+///   AK_ERROR_OK - resource is already fetched, nothing to do;
+///   AUTARK_FETCH_PENDING_RC - fetch into the printed directory is required;
+///   AUTARK_FETCH_REJECTED_RC - the directory cannot be used for this resource.
+static void _on_command_fetch_plan(int argc, const char **argv) {
+  _project_command_env_read();
+  if (optind + 1 >= argc) {
+    _usage("Missing required command arg: autark fetch-plan <project_url> <target_dir>");
+  }
+  const char *url = argv[optind++];
+  const char *target_dir = argv[optind++];
+  struct pool *pool = pool_create_empty();
+  target_dir = path_normalize_pool(target_dir, pool);
+  const char *store_dir = _fetch_store_dir(pool, target_dir);
+  struct fetchreg *reg = _fetch_reg_open(pool);
+  struct _fetch_reg_scan owner;
+  const char *dir = _fetch_reg_resolve(pool, reg, url, store_dir, &owner);
+  fetchreg_close(reg);
+  // The registry is the only authority of the dir ownership: the fetch marker
+  // may describe the origin of copied sources rather than this dir itself.
+  // A resource of a previous build is allowed to be replaced by another one.
+  if (_fetch_reg_is_live_claim(&owner)) {
+    akerror(AK_ERROR_FAIL,
+            "autark fetch-plan Dir: %s is already used by external resource: %s. "
+            "Use a distinct target dir for: %s", dir, owner.owner_url, url);
+    pool_destroy(pool);
+    _exit(AUTARK_FETCH_REJECTED_RC);
+  }
+  bool valid = _fetch_dir_valid(pool, dir, url);
+  if (g_env.verbose) {
+    akinfo("autark fetch-plan %s %s", url, dir);
+  }
+  printf("%s\n", dir);
+  fflush(stdout);
+  pool_destroy(pool);
+  _exit(valid ? AK_ERROR_OK : AUTARK_FETCH_PENDING_RC);
+}
 static void _on_command_fetched(int argc, const char **argv) {
   _project_command_env_read();
   if (optind + 1 >= argc) {
@@ -7342,41 +8837,68 @@ static void _on_command_fetched(int argc, const char **argv) {
   if (g_env.verbose) {
     akinfo("autark fetched %s %s", url, target_dir);
   }
+  int rc;
   struct pool *pool = pool_create_empty();
   target_dir = path_normalize_pool(target_dir, pool);
+  if (!path_is_dir(target_dir)) {
+    akfatal(AK_ERROR_FAIL, "autark fetched Target dir does not exist: %s", target_dir);
+  }
   const char *fetch_dep_file = path_join_path_pool(pool, target_dir, AUTARK_FETCH_DEP, 0);
-  int rc = utils_file_write_buf(fetch_dep_file, "", 0, false);
-  if (rc) {
-    akfatal(rc, "autark fetched Failed to create dependency file: %s", fetch_dep_file);
+  struct fetchreg *reg = _fetch_reg_open(pool);
+  struct _fetch_reg_scan scan = { .url = url, .dir = target_dir, .build_id = g_env.project.build_id };
+  _fetch_reg_scan(reg, &scan);
+  if (_fetch_reg_is_live_claim(&scan)) {
+    fetchreg_close(reg);
+    akfatal(AK_ERROR_FAIL,
+            "autark fetched Dir: %s is already used by another external resource: %s. "
+            "Use distinct target dirs for: %s", target_dir, scan.owner_url, url);
+  }
+  // Rewrite the marker only if it does not describe this dir: its mtime is a
+  // dependency of the consumers, so it must stay intact otherwise.
+  char *marker_url = path_is_file(fetch_dep_file) ? _fetch_marker_url(fetch_dep_file) : 0;
+  if (marker_url && strcmp(marker_url, url) != 0 && g_env.verbose) {
+    akinfo("autark fetched Take over dir: %s from: %s", target_dir, marker_url);
+  }
+  bool write_marker = !marker_url || strcmp(marker_url, url) != 0;
+  free(marker_url);
+  if (write_marker) {
+    rc = utils_file_write_buf(fetch_dep_file, url, strlen(url), false);
+    if (rc) {
+      akfatal(rc, "autark fetched Failed to create dependency file: %s", fetch_dep_file);
+    }
   }
   _on_command_dep_impl(fetch_dep_file);
-  if (  g_env.project.cache_overlay_dir
-     && path_is_prefix_for(g_env.project.cache_dir, target_dir, 0)) {
-    char *target_rel = path_relativize_cwd(g_env.project.cache_dir, target_dir, g_env.project.cache_dir);
-    const char *overlay_target = path_join_path_pool(pool, g_env.project.cache_overlay_dir, target_rel, 0);
-    rc = path_mkdirs_for(overlay_target);
-    if (rc) {
-      akfatal(rc, "autark fetched Failed to create parent dir for: %s", overlay_target);
-    }
-    if (g_env.verbose) {
-      akinfo("autark fetched Copy overlay dir: %s into %s", target_dir, overlay_target);
-    }
-    rc = utils_copy_dir(target_dir, overlay_target);
-    if (rc) {
-      akfatal(rc, "Error copying dir: %s into: %s", target_dir, overlay_target);
-    }
-    struct fetchreg *reg;
-    const char *path = path_join_path_pool(pool, g_env.project.cache_overlay_dir, AUTARK_FETCHED_REG, 0);
-    rc = fetchreg_open(path, &reg);
-    if (rc) {
-      akfatal(rc, "autark fetched Failed to open fetch registry file: %s", path);
-    }
+  if (scan.found && strcmp(scan.found_dir, target_dir) != 0) {
+    akwarn("External resource: %s is already fetched to: %s (requested: %s)",
+           url, scan.found_dir, target_dir);
+  }
+  if (!scan.found || strcmp(scan.found_dir, target_dir) != 0) {
     akcheck(fetchreg_register(reg, &(struct fetcherg_entry) {
       .url = url,
-      .target = target_rel,
+      .target = target_dir,
+      .build_id = g_env.project.build_id,
     }));
-    fetchreg_close(reg);
-    free(target_rel);
+  }
+  fetchreg_close(reg);
+  if (g_env.project.cache_overlay_dir) {
+    const char *rel = _fetch_overlay_rel(pool, target_dir);
+    if (rel) {
+      const char *overlay_target = path_join_path_pool(pool, g_env.project.cache_overlay_dir, rel, 0);
+      if (write_marker || !path_is_dir(overlay_target)) {
+        rc = path_mkdirs_for(overlay_target);
+        if (rc) {
+          akfatal(rc, "autark fetched Failed to create parent dir for: %s", overlay_target);
+        }
+        if (g_env.verbose) {
+          akinfo("autark fetched Copy overlay dir: %s into %s", target_dir, overlay_target);
+        }
+        rc = utils_copy_dir(target_dir, overlay_target);
+        if (rc) {
+          akfatal(rc, "Error copying dir: %s into: %s", target_dir, overlay_target);
+        }
+      }
+      _fetch_overlay_register(pool, url, rel);
+    }
   }
   pool_destroy(pool);
 }
@@ -7504,6 +9026,8 @@ AK_DESTRUCTOR void autark_dispose(void) {
     ulist_destroy_keep(&g_env.units);
     ulist_destroy_keep(&g_env.stack_units);
     map_destroy(g_env.map_path_to_unit);
+    toolchain_destroy(g_env.project.toolchain);
+    cxx_modules_dispose();
     pool_destroy(pool);
     memset(&g_env, 0, sizeof(g_env));
   }
@@ -7554,6 +9078,7 @@ void autark_run(int argc, const char **argv) {
     { "install", 0, 0, 'I' },
     { "install-source-deps", 0, 0, 'S' },
     { "prefix", 1, 0, 'R' },
+    { "toolchain", 1, 0, -7 },
     { "dir", 1, 0, 'C' },
     { "jobs", 1, 0, 'J' },
     { "bindir", 1, 0, -1 },
@@ -7626,6 +9151,9 @@ void autark_run(int argc, const char **argv) {
         break;
       case -6:
         g_env.install.data_dir = pool_strdup(g_env.pool, optarg);
+        break;
+      case -7:
+        g_env.project.toolchain_path = path_normalize_cwd_pool(optarg, g_env.cwd, g_env.pool);
         break;
       case 'J': {
         int rc = 0;
@@ -7722,11 +9250,21 @@ void autark_run(int argc, const char **argv) {
     } else if (strcmp(arg, "fetched") == 0) {
       _on_command_fetched(argc, argv);
       return;
+    } else if (strcmp(arg, "fetch-plan") == 0) {
+      _on_command_fetch_plan(argc, argv);
+      return;
     } else { // Root dir expected
       g_env.project.root_dir = pool_strdup(g_env.pool, arg);
     }
   }
   autark_build_prepare(AUTARK_SCRIPT);
+  if (!g_env.project.toolchain_path) {
+    const char *toolchain = getenv(AUTARK_TOOLCHAIN_ENV);
+    if (toolchain && *toolchain != '\0') {
+      g_env.project.toolchain_path = path_normalize_cwd_pool(toolchain, g_env.cwd, g_env.pool);
+    }
+  }
+  toolchain_activate();
   if (g_env.project.options) {
     _options();
   } else {
@@ -7754,6 +9292,7 @@ int main(int argc, const char **argv) {
 #include "nodes.h"
 #include "autark.h"
 #include "paths.h"
+#include "toolchain.h"
 #include <unistd.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -8504,7 +10043,8 @@ static unsigned _rule_type(const char *key, unsigned *flags) {
     return NODE_TYPE_RUN;
   } else if (strcmp(key, "meta") == 0) {
     return NODE_TYPE_META;
-  } else if (strcmp(key, "cc") == 0 || strcmp(key, "cxx") == 0) {
+  } else if (  strcmp(key, "cc") == 0 || strcmp(key, "cxx") == 0
+            || strcmp(key, "host-cc") == 0 || strcmp(key, "host-cxx") == 0) {
     return NODE_TYPE_CC;
   } else if (strcmp(key, "configure") == 0) {
     return NODE_TYPE_CONFIGURE;
@@ -9175,6 +10715,89 @@ int script_open(const char *file, struct sctx **out) {
 int script_include(struct node *parent, const char *file, struct node **out) {
   return _script_open(parent, file, out);
 }
+static int _script_parse_impl(struct xnode *x, struct value *val) {
+  int rc = 0;
+  x->xp = xmalloc(sizeof(*x->xp));
+  *x->xp = (struct xparse) {
+    .stack = { .usize = sizeof(struct xnode*) },
+    .xerr = xstr_create_empty(),
+    .val = *val,
+  };
+  yycontext *yy = x->xp->yy = xmalloc(sizeof(yycontext));
+  *yy = (yycontext) {
+    .x = x
+  };
+  if (!yyparse(yy)) {
+    rc = AK_ERROR_SCRIPT_SYNTAX;
+    _yyerror(yy);
+    if (x->xp->xerr->size) {
+      akerror(rc, "%s\n", x->xp->xerr->ptr);
+    } else {
+      akerror(rc, 0, 0);
+    }
+  }
+  _xparse_destroy(x->xp);
+  x->xp = 0;
+  return rc;
+}
+int script_open_fragment(
+  const char *file,
+  const char *unit_path,
+  struct pool *unit_pool,
+  struct unit **out_unit,
+  struct sctx **out) {
+  int rc = 0;
+  struct pool *pool = g_env.pool;
+  if (out_unit) {
+    *out_unit = 0;
+  }
+  if (out) {
+    *out = 0;
+  }
+  struct value buf = utils_file_as_buf(file, (1024 * 1024));
+  if (buf.error) {
+    return value_destroy(&buf);
+  }
+  _preprocess_script(&buf);
+  struct sctx *ctx = pool_calloc(pool, sizeof(*ctx));
+  ulist_init(&ctx->nodes, 64, sizeof(struct node*));
+  ctx->products = map_create_str(map_k_free);
+  struct xnode *x = pool_calloc(pool, sizeof(*x));
+  x->base.ctx = ctx;
+  ctx->root = (struct node*) x;
+  x->base.value = pool_strdup(pool, file);
+  x->base.type = NODE_TYPE_SCRIPT;
+  struct unit *unit = unit_create(unit_path, UNIT_FLG_NO_CWD, unit_pool ? unit_pool : pool);
+  char dirbuf[PATH_MAX];
+  utils_strncpy(dirbuf, file, sizeof(dirbuf));
+  char *dir = path_dirname(dirbuf);
+  unit->dir = pool_strdup(pool, dir ? dir : ".");
+  unit->n = &x->base;
+  x->base.unit = unit;
+  _node_register(ctx, x);
+  rc = _node_bind(&x->base);
+  if (rc) {
+    _xnode_destroy(x);
+    value_destroy(&buf);
+    return rc;
+  }
+  rc = _script_parse_impl(x, &buf);
+  if (!rc) {
+    rc = _script_bind(ctx);
+  }
+  if (rc) {
+    _xnode_destroy(x);
+  } else {
+    if (out_unit) {
+      *out_unit = unit;
+    }
+    if (out) {
+      *out = ctx;
+    }
+  }
+  value_destroy(&buf);
+  return rc;
+}
 void script_build(struct sctx *s) {
   akassert(s->root);
   node_init(s->root);
@@ -9466,6 +11089,26 @@ void node_add_unit_deps(struct node *n, struct deps *deps) {
     }
   }
 }
+/// Registers the active target toolchain as a dependency of a resolved node.
+///
+/// This makes switching the target (or switching between native and cross builds)
+/// invalidate all artifacts produced by the node.
+static void node_resolve_toolchain_deps(struct node_resolve *r) {
+  const char *target = toolchain_id();
+  if (!target) {
+    return;
+  }
+  struct deps deps;
+  if (deps_open(r->deps_path_tmp, 0, &deps)) {
+    return;
+  }
+  deps_add_sys_env(&deps, 0, AUTARK_TARGET_ENV, target);
+  if (g_env.project.toolchain && g_env.project.toolchain->path) {
+    deps_add_sys_env(&deps, 0, AUTARK_TOOLCHAIN_ENV, g_env.project.toolchain->path);
+    deps_add(&deps, DEPS_TYPE_FILE, 0, g_env.project.toolchain->path, 0);
+  }
+  deps_close(&deps);
+}
 void node_resolve(struct node_resolve *r) {
   akassert(r && r->path && r->n);
   int rc = 0;
@@ -9486,10 +11129,14 @@ void node_resolve(struct node_resolve *r) {
   if (r->on_init) {
     r->on_init(r);
   }
+  bool target_dep_seen = false;
   if (!r->force_outdated && !deps_open(deps_path, DEPS_OPEN_READONLY, &deps)) {
     char *prev_outdated = 0;
     while (deps_cur_next(&deps)) {
       ++r->num_deps;
+      if (deps.type == DEPS_TYPE_SYS_ENV && !target_dep_seen && deps.alias && strcmp(deps.alias, AUTARK_TARGET_ENV) == 0) {
+        target_dep_seen = true;
+      }
       bool outdated = false;
       if (prev_outdated && strcmp(prev_outdated, deps.resource) == 0) {
         outdated = false;
@@ -9524,11 +11171,20 @@ void node_resolve(struct node_resolve *r) {
     deps_close(&deps);
   }
   bool env_created = false;
-  if (r->on_resolve && (r->num_deps == 0 || r->resolve_outdated.num)) {
+  bool target_changed = false;
+  if (toolchain_id() && !target_dep_seen) {
+    // A cross build cache must not be reused by an older (or native) build
+    if (g_env.verbose) {
+      node_info(r->n, "Target toolchain changed: %s", toolchain_id());
+    }
+    target_changed = true;
+  }
+  if (r->on_resolve && (r->num_deps == 0 || r->resolve_outdated.num || target_changed)) {
     if (g_env.check.log && r->n) {
       xstr_printf(g_env.check.log, "%s: resolved outdated outdated=%u\n", r->n->name, r->resolve_outdated.num);
     }
     r->on_resolve(r);
+    node_resolve_toolchain_deps(r);
     if (access(deps_path_tmp, F_OK) == 0) {
       rc = utils_rename_file(deps_path_tmp, deps_path);
       if (rc) {
